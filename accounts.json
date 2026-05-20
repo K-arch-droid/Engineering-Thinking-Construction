@@ -1,0 +1,50 @@
+[
+  {
+    "id": 1,
+    "date": "2026-05-19",
+    "type": "income",
+    "category": "红包",
+    "amount": 1000.0,
+    "note": "妈妈"
+  },
+  {
+    "id": 2,
+    "date": "2026-05-20",
+    "type": "expense",
+    "category": "购物",
+    "amount": 473.0,
+    "note": "京东白条"
+  },
+  {
+    "id": 3,
+    "date": "2026-05-20",
+    "type": "expense",
+    "category": "购物",
+    "amount": 28.0,
+    "note": "花呗"
+  },
+  {
+    "id": 4,
+    "date": "2026-05-20",
+    "type": "expense",
+    "category": "其他",
+    "amount": 50.0,
+    "note": "还姐姐"
+  },
+  {
+    "id": 5,
+    "date": "2026-05-20",
+    "type": "expense",
+    "category": "餐饮",
+    "amount": 31.0,
+    "note": "放纵餐"
+  },
+  {
+    "id": 6,
+    "date": "2026-05-20",
+    "type": "expense",
+    "category": "餐饮",
+    "amount": 4.0,
+    "note": "洗衣服"
+  }
+]
