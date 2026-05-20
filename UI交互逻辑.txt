@@ -1,5 +1,5 @@
 # ============================================================
-#  个人记账本 v1.3 - UI 交互逻辑详解（Python 学习版）
+#  个人记账本 v1.4 - UI 交互逻辑详解（Python 学习版）
 # ============================================================
 #
 #  本文档从"用户看到什么"出发，逐一解释每个界面元素背后的代码逻辑。
@@ -9,8 +9,8 @@
 #    先看"用户视角"（界面描述），再看"代码视角"（完整函数 + 注释）。
 #    建议配合 gui.py 的源码对照阅读。
 #
-#  版本：v1.3（2026-05-20）
-#  更新：新增 THEME_PRESETS 主题预设系统、设置页高级操作区
+#  版本：v1.4（2026-05-20）
+#  更新：新增菜单栏（帮助 → 打开学习文档）、PyInstaller 打包体系
 #
 # ============================================================
 
@@ -85,6 +85,42 @@
 #       GUI 程序不是从上到下顺序执行的，而是"等待事件 → 调用回调"。
 #       用户点按钮 → 触发 command 参数指定的函数 → 函数执行完 → 继续等待。
 #       mainloop() 就是这个"等待循环"。
+#
+# 16. sys.frozen
+#       PyInstaller 打包后，sys 模块会多出 frozen=True 属性。
+#       代码可以用 getattr(sys, 'frozen', False) 判断当前是
+#       开发环境还是打包环境，从而选择正确的文件路径。
+#
+# 17. sys.executable
+#       当前运行的可执行文件的路径。
+#       开发时 = python.exe 的路径（如 C:/Python314/python.exe）
+#       打包后 = 你的 .exe 的路径（如 dist/个人记账本/个人记账本.exe）
+#
+# 18. getattr(obj, name, default)
+#       安全获取对象属性。obj 有 name 属性就返回值，没有就返回 default。
+#       比 obj.name 安全，不会因为属性不存在而报错。
+#       例如：getattr(sys, 'frozen', False) 检查 sys 是否有 frozen 属性。
+#
+# 19. os.startfile(filepath)
+#       Windows 专用函数：用默认程序打开文件或目录。
+#       传文件路径 → 用默认程序打开（.txt 用记事本）
+#       传目录路径 → 用资源管理器打开
+#       macOS/Linux 不支持，需要用 subprocess.Popen(["open", filepath])
+#
+# 20. subprocess.Popen(args)
+#       启动一个外部进程。args 是命令和参数的列表。
+#       例如：subprocess.Popen(["open", filepath]) 在 macOS 上打开文件。
+#       和 os.system() 的区别：Popen 更灵活，不会阻塞当前程序。
+#
+# 21. PyInstaller
+#       Python 打包工具，把 Python 程序变成独立可执行文件。
+#       核心原理：分析 import 依赖 → 收集所有模块 → 嵌入 Python 解释器 → 生成 .exe
+#
+# 22. tk.Menu 菜单系统
+#       tkinter 的菜单有两层：
+#         Menu (菜单栏) → add_cascade 挂载子菜单
+#           └── Menu (下拉菜单) → add_command 添加菜单项
+#       command 参数传函数引用（不是调用结果）。
 #
 # ============================================================
 
@@ -1552,32 +1588,349 @@ if __name__ == "__main__":
 
 
 # ============================================================
+#  菜单栏交互详解（v1.4 新增）—— 你看到窗口顶部多了一行"帮助"
+# ============================================================
+#
+#  【用户视角】
+#  窗口顶部出现一行菜单栏，只有一个"帮助"菜单。
+#  点击"帮助"弹出下拉菜单：
+#    📖 代码阅读目录   → 用记事本打开 code阅读目录.txt
+#    📖 UI 交互逻辑    → 用记事本打开 UI交互逻辑.txt
+#    📖 更新日志       → 用记事本打开 更新日志.txt
+#    📖 README         → 用记事本打开 README.md
+#    ─────────────────
+#    📂 打开学习资料目录 → 资源管理器打开 docs/ 文件夹
+#    ─────────────────
+#    关于              → 弹窗显示版本信息
+#
+#  你不需要手动去文件夹里找这些文件，点一下菜单就打开了。
+#
+#
+#  【代码视角：_build_menubar()】
+#
+#  tkinter 菜单系统的层级结构：
+#
+#    tk.Menu (菜单栏)                    ← 水平的那一行
+#      └── add_cascade("帮助")
+#            └── tk.Menu (下拉菜单)      ← 点击后弹出的垂直列表
+#                  ├── add_command("📖 代码阅读目录")
+#                  ├── add_command("📖 UI 交互逻辑")
+#                  ├── add_command("📖 更新日志")
+#                  ├── add_command("📖 README")
+#                  ├── add_separator()   ← 分隔线
+#                  ├── add_command("📂 打开学习资料目录")
+#                  ├── add_separator()
+#                  └── add_command("关于")
+#
+#  关键代码：
+#    menubar = tk.Menu(self.root)          # 创建菜单栏
+#    help_menu = tk.Menu(menubar, tearoff=0)  # 创建下拉菜单
+#    help_menu.add_command(label="...", command=self._open_doc_xxx)
+#    menubar.add_cascade(label="帮助", menu=help_menu)  # 挂载子菜单
+#    self.root.config(menu=menubar)        # 绑定到窗口
+#
+#  tearoff=0 的含义：
+#    tkinter 的菜单有个古老特性叫"撕下"（tearoff），
+#    用户可以把菜单"撕下来"变成一个独立浮动窗口。
+#    现代程序都不用这个特性，所以设为 0 禁用。
+#
+#  command 参数的陷阱：
+#    ❌ command=self._open_file("xxx")    # 会立即执行！把返回值赋给 command
+#    ✅ command=self._open_doc_code_guide  # 传函数引用，点击时才执行
+#    ✅ command=lambda: self._open_file("xxx")  # lambda 延迟执行
+#
+#
+#  【代码视角：_open_file() —— 跨平台打开文件】
+#
+#  不同操作系统打开文件的命令不同：
+#
+#    操作系统    打开文件                        打开目录
+#    --------    --------                        --------
+#    Windows     os.startfile(filepath)          os.startfile(folder)
+#    macOS       subprocess(["open", filepath])  subprocess(["open", folder])
+#    Linux       subprocess(["xdg-open", ...])   subprocess(["xdg-open", ...])
+#
+#  os.startfile() 是 Windows 内置函数：
+#    - 传文件路径 → 用默认程序打开（.txt 用记事本，.md 用默认编辑器）
+#    - 传目录路径 → 用资源管理器打开
+#    - 只在 Windows 上可用，macOS/Linux 会报错
+#
+#  subprocess.Popen() 是更通用的方式：
+#    - 启动一个外部进程（这里是系统命令 "open" 或 "xdg-open"）
+#    - 跨平台，但需要知道每个系统的命令名
+#
+#  sys.platform 的值：
+#    "win32"  = Windows（32位和64位都是 "win32"，这是历史遗留）
+#    "darwin" = macOS（Darwin 是 macOS 的内核名）
+#    "linux"  = Linux
+#
+#  get_resource_path() 的作用：
+#    开发时："code阅读目录.txt" → "C:/项目/code阅读目录.txt"
+#    打包后："code阅读目录.txt" → "dist/个人记账本/_internal/code阅读目录.txt"
+#    它会自动判断当前是开发还是打包环境，返回正确的绝对路径。
+#
+#
+#  【代码视角：菜单项回调函数】
+#
+#  每个菜单项都有一个独立的回调函数：
+#    def _open_doc_code_guide(self):
+#        self._open_file("code阅读目录.txt")
+#
+#  为什么不用 lambda？
+#    两种写法都能工作：
+#      help_menu.add_command(command=self._open_doc_code_guide)
+#      help_menu.add_command(command=lambda: self._open_file("xxx"))
+#    但独立函数更好：
+#      1. 调试时堆栈里能看到函数名（_open_doc_code_guide），而不是 "lambda"
+#      2. 可以加文档字符串说明用途
+#      3. 代码更清晰
+#
+#
+#  【代码视角：_open_docs_folder() —— 打开目录】
+#
+#  os.startfile(folder) 打开目录 = 调用资源管理器（Windows Explorer）。
+#  这和双击文件夹的效果一样。
+#
+#  为什么先检查 os.path.isdir()？
+#    打包后 docs/ 目录在 _internal/ 内部。
+#    如果打包配置有误（比如漏了 --add-data docs），目录就不存在。
+#    提前检查可以给用户友好的错误提示，而不是直接崩溃。
+#
+#
+#  【代码视角：_show_about() —— 关于弹窗】
+#
+#  messagebox.showinfo(title, message)：
+#    - messagebox 是 tkinter 内置的弹窗模块
+#    - showinfo 显示一个带"确定"按钮的信息弹窗
+#    - 还有 showwarning（警告）、showerror（错误）、askyesno（是/否）
+#
+# ============================================================
+#
+#
+# ============================================================
+#  打包流程详解（v1.4 新增）—— 从源码到 .exe 的完整过程
+# ============================================================
+#
+#  【打包是什么？】
+#
+#  你的 Python 程序需要这些东西才能运行：
+#    1. Python 解释器（python.exe）
+#    2. 第三方库（ttkbootstrap、PIL 等）
+#    3. 你的源码（gui.py、config.py 等）
+#    4. 数据文件（图标、文档等）
+#
+#  如果把程序发给朋友，朋友的电脑上没装 Python，就跑不起来。
+#  "打包"就是把上面 4 样东西全部塞进一个文件夹，
+#  让朋友双击 .exe 就能运行，不需要装任何东西。
+#
+#
+#  【PyInstaller 打包流程图】
+#
+#    python build.py
+#        |
+#        v
+#    build.py 构建参数列表 args
+#        |-- gui.py          （入口文件）
+#        |-- --name=个人记账本 （输出文件名）
+#        |-- --noconsole      （不显示控制台）
+#        |-- --onedir         （文件夹模式）
+#        |-- --icon=...       （exe 图标）
+#        |-- --version-file=...（版本信息）
+#        |-- --hidden-import=...（隐藏导入）
+#        |-- --add-data=...   （数据文件）
+#        |
+#        v
+#    PyInstaller.__main__.run(args)
+#        |
+#        v
+#    PyInstaller 分析 gui.py 的 import 语句
+#        |-- 找到 config.py、models.py、storage.py ...
+#        |-- 找到 ttkbootstrap、PIL ...
+#        |-- 追踪所有间接依赖
+#        |
+#        v
+#    收集所有需要的文件
+#        |-- Python 解释器（python314.dll）
+#        |-- 标准库模块（压缩为 base_library.zip）
+#        |-- 第三方库（ttkbootstrap 主题文件、PIL 图像处理）
+#        |-- 你的源码（编译为 .pyc 字节码）
+#        |-- 数据文件（通过 --add-data 指定的）
+#        |
+#        v
+#    生成输出目录 dist/个人记账本/
+#        ├── 个人记账本.exe      ← 启动器（很小，只是引导程序）
+#        └── _internal/          ← 实际内容
+#            ├── python314.dll   ← Python 解释器
+#            ├── base_library.zip← 标准库
+#            ├── ttkbootstrap/   ← 第三方库
+#            ├── PIL/            ← 第三方库
+#            ├── gui.pyc         ← 你的代码（编译后）
+#            ├── assets/icon.ico ← 你指定的数据文件
+#            └── docs/           ← 你指定的数据文件
+#
+#
+#  【打包后的路径变化】
+#
+#  开发时（python gui.py）：
+#    __file__ = "C:/项目/config.py"
+#    DATA_DIR = "C:/项目/"
+#    资源文件 = "C:/项目/code阅读目录.txt"
+#
+#  打包后（个人记账本.exe）：
+#    __file__ 不存在了（代码嵌入在 exe 内部）
+#    sys.frozen = True（标记"我是打包后的程序"）
+#    sys.executable = "dist/个人记账本/个人记账本.exe"
+#    DATA_DIR = "dist/个人记账本/"（exe 所在目录，可写）
+#    资源文件 = "dist/个人记账本/_internal/code阅读目录.txt"
+#
+#  config.py 中的两个路径函数处理了这个差异：
+#    get_base_path()     → DATA_DIR（用户数据，可写）
+#    get_resource_path() → _internal/（内置资源，只读）
+#
+#
+#  【隐藏导入（hidden import）】
+#
+#  PyInstaller 通过分析代码中的 import 语句来找出依赖。
+#  但有些模块它发现不了：
+#
+#    ttkbootstrap 的主题文件（.json）：
+#      ttkbootstrap 在运行时动态加载主题文件，
+#      代码里没有 import 这些 .json 文件，所以 PyInstaller 找不到。
+#      解决：--hidden-import=ttkbootstrap + --collect-all=ttkbootstrap
+#
+#    PIL 的 tkinter 支持：
+#      PIL（Pillow）通过 PIL._tkinter_finder 模块和 tkinter 对接，
+#      这个模块也是运行时动态加载的。
+#      解决：--hidden-import=PIL._tkinter_finder
+#
+#
+#  【--onedir vs --onefile】
+#
+#  --onedir（文件夹模式）：
+#    + 启动快（直接运行）
+#    + 文件结构清晰（可以手动查看 _internal/）
+#    + 用户数据可以放在 exe 旁边
+#    - 文件多（一个文件夹，不是一个文件）
+#    - 分发时需要压缩成 zip
+#
+#  --onefile（单文件模式）：
+#    + 只有一个 .exe 文件，分发方便
+#    - 启动慢（每次运行要先解压到临时目录）
+#    - 临时目录路径不固定，用户数据管理困难
+#    - 杀毒软件可能误报
+#
+#  本项目选 --onedir，因为 accounts.json 需要放在 exe 旁边。
+#
+#
+#  【version_info.txt —— Windows 版本信息】
+#
+#  Windows 的 .exe 文件可以嵌入"版本信息"资源，
+#  右键 exe → 属性 → 详细信息 可以看到：
+#    产品名称：个人记账本
+#    文件版本：1.3.0.0
+#    版权：Copyright (C) 2026
+#
+#  version_info.txt 用 Python 语法描述这些信息：
+#    filevers=(1, 3, 0, 0)   → 文件版本号（四元组）
+#    prodvers=(1, 3, 0, 0)   → 产品版本号
+#    080404b0                → 语言代码（简体中文 + Unicode）
+#
+#  PyInstaller 通过 --version-file 参数读取这个文件，
+#  在打包时把版本信息嵌入到 exe 中。
+#
+# ============================================================
+#
+#
+# ============================================================
+#  PyInstaller 知识速查
+# ============================================================
+#
+#  1. PyInstaller 是什么？
+#     Python 最常用的打包工具，把 Python 程序变成独立可执行文件。
+#     支持 Windows、macOS、Linux。
+#
+#  2. --onedir vs --onefile？
+#     --onedir：生成文件夹，启动快，文件多。
+#     --onefile：生成单个 exe，启动慢（要解压），分发方便。
+#
+#  3. sys.frozen 是什么？
+#     PyInstaller 打包后，sys 模块会多出 frozen=True 属性。
+#     代码可以用它判断当前是开发环境还是打包环境。
+#
+#  4. sys.executable 是什么？
+#     开发时 = python.exe 的路径
+#     打包后 = 你的 .exe 的路径
+#
+#  5. --add-data 怎么用？
+#     把非 .py 文件（图片、文档、JSON）打包进去。
+#     格式："源路径:目标目录"（Windows 用 ";" 代替 ":"）
+#
+#  6. --hidden-import 怎么用？
+#     告诉 PyInstaller："这个模块也要打包，虽然你分析不到它。"
+#     用于运行时动态加载的模块（如 ttkbootstrap 主题文件）。
+#
+#  7. --collect-all 怎么用？
+#     把一个包的所有文件（包括数据文件）都收集起来。
+#     比 --hidden-import 更彻底。
+#
+#  8. --noconsole 和 --console？
+#     --noconsole：不显示控制台窗口（GUI 程序用这个）
+#     --console：显示控制台窗口（CLI 程序用这个）
+#
+#  9. --icon 怎么用？
+#     设置 exe 文件的图标（资源管理器中看到的那个图标）。
+#     需要 .ico 格式，支持多尺寸（16/32/48/256px）。
+#
+#  10. --version-file 怎么用？
+#      嵌入 Windows 版本信息（右键 → 属性 → 详细信息）。
+#      需要一个 Python 语法的 .txt 文件描述版本信息。
+#
+#  11. PyInstaller.__main__.run(args) 是什么？
+#      PyInstaller 的编程接口，等价于命令行 pyinstaller。
+#      用编程方式可以动态构建参数（循环、条件判断）。
+#
+#  12. 打包后 __file__ 为什么不存在了？
+#      因为你的 .py 代码被编译成 .pyc 字节码，嵌入到 exe 内部。
+#      __file__ 是 Python 源文件的路径，源文件不在了，__file__ 也不存在了。
+#
+# ============================================================
+#
+#
+# ============================================================
 #  函数索引（按行号快速查找）
 # ============================================================
 #
 #  行号    函数名                    功能
 #  ----    --------                  ----
-#   83     _StatsRow.__init__        月度统计行适配器
-#  121     AccountApp.__init__       七步启动流程
-#  166     _build_ui                 构建标签页容器
-#  192     _build_add_tab            构建"记一笔"标签页
-#  252     _on_type_change           分类频率排序
-#  278     _on_save_entry            核心数据流（保存记录）
-#  326     _clear_add_form           清空表单
-#  341     _build_list_tab           构建"收支流水"标签页
-#  398     _refresh_list             从内存刷新界面
-#  433     _on_delete_entry          缓冲删除 + 撤回栈
-#  478     _on_undo_delete           撤回最近一次删除
-#  502     _update_undo_button_state 更新撤回按钮状态
-#  515     _on_close                 窗口关闭确认
-#  551     _build_stats_tab          构建"月度统计"标签页
-#  615     _on_query_stats           月度统计查询
-#  688     _build_settings_tab       构建"设置"标签页
-#  824     _on_apply_settings        应用设置
-#  899     _on_theme_select          分隔行防误选
-#  916     _on_restore_settings      恢复系统设置
-#  965     _on_reset_software        重置软件
-# 1015     run                       启动应用主循环
-# 1039     main                      程序入口
+#   99     _StatsRow.__init__        月度统计行适配器
+#  125     AccountApp.__init__       七步启动流程
+#  170     _build_ui                 构建菜单栏 + 标签页容器
+#  197     _build_menubar            构建菜单栏（帮助菜单）
+#  247     _open_file                跨平台打开文件
+#  286     _open_doc_code_guide      打开代码阅读目录
+#  290     _open_doc_ui_logic        打开UI交互逻辑
+#  294     _open_doc_changelog       打开更新日志
+#  298     _open_doc_readme          打开README
+#  302     _open_docs_folder         打开学习资料目录
+#  324     _show_about               关于弹窗
+#  341     _build_add_tab            构建"记一笔"标签页
+#  401     _on_type_change           分类频率排序
+#  427     _on_save_entry            核心数据流（保存记录）
+#  475     _clear_add_form           清空表单
+#  490     _build_list_tab           构建"收支流水"标签页
+#  547     _refresh_list             从内存刷新界面
+#  582     _on_delete_entry          缓冲删除 + 撤回栈
+#  627     _on_undo_delete           撤回最近一次删除
+#  651     _update_undo_button_state 更新撤回按钮状态
+#  664     _on_close                 窗口关闭确认
+#  700     _build_stats_tab          构建"月度统计"标签页
+#  764     _on_query_stats           月度统计查询
+#  837     _build_settings_tab       构建"设置"标签页
+#  973     _on_apply_settings        应用设置
+# 1048     _on_theme_select          分隔行防误选
+# 1065     _on_restore_settings      恢复系统设置
+# 1114     _on_reset_software        重置软件
+# 1164     run                       启动应用主循环
+# 1188     main                      程序入口
 #
 # ============================================================

@@ -18,17 +18,80 @@ config.py - 全局配置模块（数据流的起点：所有模块的"参数表"
 """
 
 import os
+import sys
 
 # ============================================================
-# 路径配置
+# 路径配置（兼容 PyInstaller 打包）
 # ============================================================
 
-# 数据文件的默认存储路径
-# os.path.dirname(__file__) = 当前文件所在目录
-# os.path.abspath() = 转为绝对路径（避免相对路径的歧义）
-# os.path.join() = 自动拼接路径分隔符（Windows 用 \，Mac/Linux 用 /）
-# 这样无论从哪个目录启动程序，都能正确定位到数据文件
-DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+# 【为什么要区分"开发时"和"打包后"的路径？】
+#
+# 开发时（直接运行 python gui.py）：
+#   __file__ = "C:/项目/config.py"
+#   数据文件和 .py 在同一个目录
+#
+# 打包后（运行 个人记账本.exe）：
+#   __file__ 不存在了！（代码已被嵌入 exe 内部）
+#   exe 在 "dist/个人记账本/" 目录
+#   内部资源在 "dist/个人记账本/_internal/" 目录
+#   用户数据（accounts.json）需要在 exe 旁边（可写）
+#
+# 所以需要两个路径函数：
+#   get_base_path()     → 用户数据位置（exe 旁边，可写）
+#   get_resource_path() → 内部资源位置（_internal/ 内，只读）
+
+
+def get_base_path():
+    """获取用户数据目录（可写位置）。
+
+    【PyInstaller 的 frozen 机制】
+    当程序被 PyInstaller 打包后，sys 模块会多出两个属性：
+      - sys.frozen = True     （标记"我是打包后的程序"）
+      - sys.executable = exe 文件的完整路径
+
+    getattr(sys, 'frozen', False) 的意思是：
+      如果 sys 有 frozen 属性，返回它的值（True）；
+      如果没有（开发时），返回默认值 False。
+
+    这样同一份代码，开发时和打包后都能正确找到路径。
+    """
+    if getattr(sys, 'frozen', False):
+        # 打包后：exe 所在目录（用户数据放这里，可读可写）
+        return os.path.dirname(sys.executable)
+    # 开发时：源码所在目录
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def get_resource_path(relative_path=""):
+    """获取内部资源路径（只读，如内置文档、图标）。
+
+    【为什么资源文件在 _internal/ 目录？】
+    PyInstaller --onedir 模式的目录结构：
+      个人记账本/
+        ├── 个人记账本.exe       ← sys.executable 指向这里
+        ├── accounts.json        ← 用户数据（在 exe 旁边）
+        └── _internal/           ← PyInstaller 的内部目录
+            ├── assets/icon.ico  ← 内部资源在这里
+            ├── docs/
+            └── ...（Python 解释器 + 第三方库）
+
+    所以内部资源的基目录 = exe 所在目录 + "/_internal"
+    """
+    if getattr(sys, 'frozen', False):
+        # 打包后：内部资源在 _internal/ 子目录
+        base = os.path.join(os.path.dirname(sys.executable), "_internal")
+    else:
+        # 开发时：资源和源码在同一目录
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, relative_path) if relative_path else base
+
+
+# DATA_DIR = 用户数据目录（accounts.json 读写位置）
+# 打包后指向 exe 旁边，开发时指向源码目录
+DATA_DIR = get_base_path()
+
+# DATA_FILE = accounts.json 的完整路径
+# storage.py 会用这个路径读写记账数据
 DATA_FILE = os.path.join(DATA_DIR, "accounts.json")
 
 # ============================================================

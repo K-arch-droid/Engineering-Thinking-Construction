@@ -47,12 +47,16 @@ import tkinter as tk                    # Python 内置的 GUI 库
 import tkinter.font as tkfont           # 字体管理
 from tkinter import messagebox          # 弹窗对话框（关闭确认等）
 from datetime import datetime
+import os
+import subprocess
+import sys
 import ttkbootstrap as ttk              # tkinter 的美化主题库（第三方）
 
 # 从 config 导入常量（配置层）
 from config import (
     TYPE_INCOME, TYPE_EXPENSE,
     INCOME_CATEGORIES, EXPENSE_CATEGORIES,
+    get_resource_path,
 )
 # 从 models 导入数据模型（模型层）
 from models import BillEntry
@@ -165,16 +169,21 @@ class AccountApp:
 
     def _build_ui(self):
         """
-        构建主界面：标签页容器 + 4 个标签页。
+        构建主界面：菜单栏 + 标签页容器 + 4 个标签页。
 
         【界面结构】
         主窗口 (root)
+            ├── 菜单栏 (menubar)
+            │   └── 帮助 → 打开文档 / 关于
             └── 标签页容器 (notebook)
                 ├── 标签页1：记一笔    → _build_add_tab()
                 ├── 标签页2：收支流水  → _build_list_tab()
                 ├── 标签页3：月度统计  → _build_stats_tab()
                 └── 标签页4：设置      → _build_settings_tab()
         """
+        # ---- 菜单栏 ----
+        self._build_menubar()
+
         # ttk.Notebook = 标签页容器（类似浏览器的多标签）
         self.notebook = ttk.Notebook(self.root, bootstyle="primary")
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
@@ -184,6 +193,146 @@ class AccountApp:
         self._build_list_tab()     # 收支流水
         self._build_stats_tab()    # 月度统计
         self._build_settings_tab() # 设置
+
+    def _build_menubar(self):
+        """
+        构建菜单栏：帮助 → 打开学习文档 / 关于。
+
+        【tkinter 菜单系统的结构】
+        菜单栏的层级关系：
+            Menu (菜单栏)             ← 水平的那一行
+              └── Menu (下拉菜单)     ← 点击后弹出的垂直列表
+                    ├── add_command   ← 可点击的菜单项
+                    ├── add_separator ← 分隔线
+                    └── add_command
+
+        Menu(menubar, tearoff=0) 的 tearoff=0 表示：
+          禁用"撕下"功能（tearoff 是 tkinter 的古老特性，
+          允许用户把菜单"撕下来"变成独立窗口，现代程序都不用它）。
+
+        add_cascade(label="帮助", menu=help_menu) 的意思是：
+          在菜单栏上添加一个"帮助"按钮，点击后展开 help_menu 子菜单。
+        """
+        # 创建顶级菜单栏（水平的那一行）
+        menubar = tk.Menu(self.root)
+
+        # ---- 帮助菜单（下拉菜单）----
+        help_menu = tk.Menu(menubar, tearoff=0)
+
+        # add_command：添加可点击的菜单项
+        #   label   = 显示文字
+        #   command = 点击时调用的函数（回调函数）
+        #   ⚠️ 注意：command=self._open_file("xxx") 是错误写法！
+        #      这样会立即执行函数，把返回值赋给 command。
+        #      正确写法是传函数引用：command=self._open_doc_code_guide
+        help_menu.add_command(label="📖 代码阅读目录", command=self._open_doc_code_guide)
+        help_menu.add_command(label="📖 UI 交互逻辑", command=self._open_doc_ui_logic)
+        help_menu.add_command(label="📖 更新日志", command=self._open_doc_changelog)
+        help_menu.add_command(label="📖 README", command=self._open_doc_readme)
+
+        # add_separator：在菜单中添加一条分隔线（视觉分组）
+        help_menu.add_separator()
+
+        help_menu.add_command(label="📂 打开学习资料目录", command=self._open_docs_folder)
+
+        help_menu.add_separator()
+        help_menu.add_command(label="关于", command=self._show_about)
+
+        # add_cascade：把 help_menu 作为"帮助"的子菜单挂到菜单栏上
+        menubar.add_cascade(label="帮助", menu=help_menu)
+
+        # root.config(menu=menubar)：把菜单栏绑定到主窗口
+        self.root.config(menu=menubar)
+
+    def _open_file(self, relative_path):
+        """
+        用系统默认程序打开指定文件。
+
+        【跨平台打开文件的三种方式】
+        不同操作系统打开文件的命令不同：
+          Windows : os.startfile(filepath)       —— 内置函数，最简单
+          macOS   : subprocess(["open", filepath]) —— shell 命令 "open"
+          Linux   : subprocess(["xdg-open", filepath]) —— FreeDesktop 标准
+
+        sys.platform 的值：
+          "win32"  = Windows
+          "darwin" = macOS
+          "linux"  = Linux
+
+        get_resource_path() 会把相对路径转为打包后的绝对路径：
+          开发时："code阅读目录.txt" → "C:/项目/code阅读目录.txt"
+          打包后："code阅读目录.txt" → "dist/个人记账本/_internal/code阅读目录.txt"
+        """
+        filepath = get_resource_path(relative_path)
+        if not os.path.exists(filepath):
+            show_error("文件不存在", f"找不到文件：\n{filepath}")
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(filepath)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", filepath])
+            else:
+                subprocess.Popen(["xdg-open", filepath])
+        except Exception as e:
+            show_error("打开失败", f"无法打开文件：\n{e}")
+
+    # ---- 以下 4 个函数是菜单项的回调 ----
+    # 为什么每个菜单项单独一个函数，而不是直接 lambda？
+    # 因为 add_command 的 command 参数只能传"无参数的可调用对象"。
+    # 如果用 lambda：command=lambda: self._open_file("xxx")
+    # 这样写也行，但单独的函数更清晰，也方便调试（堆栈里能看到函数名）。
+
+    def _open_doc_code_guide(self):
+        """菜单项回调：打开"代码阅读目录.txt"。"""
+        self._open_file("code阅读目录.txt")
+
+    def _open_doc_ui_logic(self):
+        """菜单项回调：打开"UI交互逻辑.txt"。"""
+        self._open_file("UI交互逻辑.txt")
+
+    def _open_doc_changelog(self):
+        """菜单项回调：打开"更新日志.txt"。"""
+        self._open_file("更新日志.txt")
+
+    def _open_doc_readme(self):
+        """菜单项回调：打开"README.md"。"""
+        self._open_file("README.md")
+
+    def _open_docs_folder(self):
+        """用资源管理器打开 docs/ 学习资料目录。
+
+        【os.startfile() vs subprocess.Popen()】
+        打开文件用 os.startfile()（Windows 内置）。
+        打开目录也用 os.startfile()——它会调用资源管理器。
+        subprocess.Popen() 是更通用的方式，但需要知道系统命令。
+        """
+        folder = get_resource_path("docs")
+        if not os.path.isdir(folder):
+            show_error("目录不存在", f"找不到目录：\n{folder}")
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as e:
+            show_error("打开失败", f"无法打开目录：\n{e}")
+
+    def _show_about(self):
+        """弹窗显示关于信息。"""
+        messagebox.showinfo(
+            "关于",
+            "个人记账本 v1.3\n\n"
+            "一个基于 Python + tkinter 的收支管理工具\n\n"
+            "功能特色：\n"
+            "  · 记账 / 流水 / 统计 / 主题设置\n"
+            "  · 缓冲保存，关闭时统一写盘\n"
+            "  · 多主题预设（护眼 / 深色 / 默认）\n\n"
+            "技术栈：Python 3.10+ / ttkbootstrap",
+        )
 
     # ==============================================================
     # 标签页 1：记一笔 —— 数据流的起点
