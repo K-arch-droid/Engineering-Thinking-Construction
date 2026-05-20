@@ -1,0 +1,6 @@
+# 个人记账本 - 依赖清单
+#
+# Python 3.10+ 标准库 + ttkbootstrap GUI 主题框架
+
+python>=3.10
+ttkbootstrap>=1.10

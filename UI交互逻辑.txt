@@ -1,0 +1,1583 @@
+# ============================================================
+#  个人记账本 v1.3 - UI 交互逻辑详解（Python 学习版）
+# ============================================================
+#
+#  本文档从"用户看到什么"出发，逐一解释每个界面元素背后的代码逻辑。
+#  每个函数都附带完整源码和逐行注释，适合 Python 初学者阅读。
+#
+#  阅读方式：
+#    先看"用户视角"（界面描述），再看"代码视角"（完整函数 + 注释）。
+#    建议配合 gui.py 的源码对照阅读。
+#
+#  版本：v1.3（2026-05-20）
+#  更新：新增 THEME_PRESETS 主题预设系统、设置页高级操作区
+#
+# ============================================================
+
+
+# ============================================================
+#  Python 基础知识速查（阅读本文档前建议先看）
+# ============================================================
+#
+#  1. def 函数名(参数: 类型) -> 返回类型:
+#       这叫"类型注解"，告诉程序员参数和返回值的类型。
+#       Python 不强制检查，但 IDE 会用它做智能提示。
+#       例如：def get_font(size_key: str = "body") -> tuple[str, int, str]:
+#
+#  2. self.xxx = xxx
+#       "self"代表当前对象实例。AccountApp 里所有 self.xxx 都是
+#       存储在对象内部的变量，整个类的所有方法都能访问。
+#
+#  3. @dataclass
+#       Python 的"数据类"装饰器。自动帮你生成 __init__、__repr__ 等方法。
+#       不用手写 def __init__(self, id, date, ...): self.id = id ...
+#
+#  4. 列表推导式 [x for x in list if condition]
+#       一行代码实现"遍历 + 过滤 + 转换"。
+#       例如：[e.amount for e in entries if e.type == "income"]
+#       等价于：
+#         result = []
+#         for e in entries:
+#             if e.type == "income":
+#                 result.append(e.amount)
+#
+#  5. f"字符串 {变量}"
+#       f-string 格式化：花括号里的变量会被替换为实际值。
+#       例如：f"共 {len(entries)} 条记录" → "共 6 条记录"
+#
+#  6. dict.get(key, default)
+#       安全取值：key 存在就返回对应值，不存在就返回 default。
+#       比 dict[key] 安全，不会因为 key 不存在而崩溃。
+#
+#  7. lambda 参数: 表达式
+#       匿名函数，常用于排序的 key 参数。
+#       例如：key=lambda c: (c == "其他", -freq.get(c, 0))
+#       意思是：排序时，先按"是不是其他"排，再按"使用次数的负数"排。
+#
+#  8. sorted(列表, key=函数)
+#       返回排序后的新列表（不修改原列表）。
+#       key 函数决定排序依据。
+#
+#  9. list.pop()
+#       从列表末尾弹出一个元素（LIFO，后进先出）。
+#       用于实现"撤回"功能：最后删除的记录最先被恢复。
+#
+# 10. os.path.join(路径1, 路径2)
+#       跨平台路径拼接。Windows 用 \，Linux/Mac 用 /，
+#       os.path.join 会自动选择正确的分隔符。
+#
+# 11. with open(文件, "r", encoding="utf-8") as f:
+#       打开文件，读取内容，自动关闭。
+#       "with"语句保证即使出错也会关闭文件（不会泄露资源）。
+#
+# 12. try: ... except 异常类型: ...
+#       捕获异常：try 块里的代码出错时，不会崩溃，
+#       而是跳到 except 块执行"兜底"逻辑。
+#
+# 13. ttkbootstrap
+#       tkinter 的美化主题库。原生 tkinter 很丑，ttkbootstrap
+#       提供了 18 个现代主题（cosmo、darkly 等），开箱即用。
+#
+# 14. ttk.Notebook
+#       标签页容器，类似浏览器的多标签页。每个标签页是一个独立的 Frame。
+#
+# 15. 事件驱动编程
+#       GUI 程序不是从上到下顺序执行的，而是"等待事件 → 调用回调"。
+#       用户点按钮 → 触发 command 参数指定的函数 → 函数执行完 → 继续等待。
+#       mainloop() 就是这个"等待循环"。
+#
+# ============================================================
+
+
+# ============================================================
+#  程序启动 —— 你看到窗口弹出来之前发生了什么
+# ============================================================
+#
+#  用户操作：双击 gui.py 或命令行输入 python gui.py
+#
+#  启动链：
+#    gui.py 第 1057 行：if __name__ == "__main__" → main()
+#    gui.py 第 1039 行：main() → AccountApp() → app.run()
+#
+# ============================================================
+
+
+# ============================================================
+#  _StatsRow 类 —— 适配器模式的典型应用（第 83-101 行）
+# ============================================================
+#
+#  【为什么需要这个类？】
+#  月度统计标签页复用了 DataTable 组件来显示统计数据。
+#  但 DataTable 期望的数据是有 id/date/type/category/amount/note
+#  字段的 BillEntry 对象。而统计数据（分类、笔数、金额）不是 BillEntry。
+#
+#  解决方案：写一个"适配器"类，让统计数据伪装成 BillEntry。
+#  这就是设计模式中的"适配器模式"——让两个接口不匹配的模块协作。
+#
+# ============================================================
+
+class _StatsRow:
+    """
+    月度统计表格的行数据适配器。
+    把 (分类, 笔数, 金额, 类型) 包装成 DataTable 能识别的格式。
+    """
+    def __init__(self, cat: str, count: int, amt: float, entry_type: str):
+        self.id = 0                                   # 编号（统计行没有真实编号）
+        self.date = "收入" if entry_type == TYPE_INCOME else "支出"  # 显示为"收入"或"支出"
+        self.type = entry_type                        # 类型（income / expense）
+        self.category = cat                           # 分类名
+        self.amount = amt                             # 金额合计
+        self.note = f"{count} 笔"                     # 备注列显示笔数
+
+
+# ============================================================
+#  AccountApp.__init__() —— 七步启动流程（第 121-164 行）
+# ============================================================
+#
+#  这是整个程序的构造函数。窗口创建、数据加载、界面构建都在这里。
+#  七步启动流程，每一步都有明确的职责。
+#
+#  【Python 知识点：__init__ 方法】
+#  __init__ 是 Python 类的构造函数，创建对象时自动调用。
+#  AccountApp() 会触发 __init__()，不需要手动调用。
+#
+# ============================================================
+
+    def __init__(self):
+        # ---- 第一步：加载用户设置 ----
+        # 从 settings.json 读取字体、主题等配置
+        # 如果文件不存在（首次运行），使用默认值
+        self._settings = load_settings()
+
+        # ---- 第二步：创建主窗口 ----
+        # ttkbootstrap 的 Window 类是 tkinter.Tk 的美化版
+        self.root = ttk.Window(
+            title=WINDOW_TITLE,           # 窗口标题（来自 theme.py）
+            themename=THEME_NAME,         # 主题名（来自 settings.json 或默认值 "cosmo"）
+            size=(WINDOW_WIDTH, WINDOW_HEIGHT),           # 初始尺寸 900×600
+            minsize=(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT), # 最小尺寸 700×500
+        )
+
+        # 窗口居中显示
+        self.root.place_window_center()
+
+        # ---- 第三步：注入全局样式 ----
+        self.style = ttk.Style()
+        apply_theme(self.style)  # 把 theme.py 中定义的字体、字号应用到全局
+
+        # 如果上次保存了预设（深色/护眼/海洋蓝），启动时立即应用
+        saved_preset = self._settings.get("preset", "")
+        if saved_preset and saved_preset in THEME_PRESETS:
+            apply_preset(saved_preset, self.style)
+
+        # ---- 第四步：创建存储管理器 ----
+        # Storage.__init__ 中会调用 _ensure_file()，确保 accounts.json 存在
+        self.storage = Storage()
+
+        # ---- 第五步：初始化缓冲数据 ----
+        # 内存工作副本：所有增删操作只修改此列表，关闭时统一写盘
+        self._entries: list[BillEntry] = []
+        # 撤回栈：保存本次运行期间被删除的记录，支持撤回操作
+        self._undo_stack: list[BillEntry] = []
+        # 标记是否有未保存的改动（用于关闭时弹出保存确认）
+        self._has_changes = False
+
+        # ---- 第六步：构建界面 ----
+        self._build_ui()
+
+        # ---- 第七步：注册窗口关闭事件 ----
+        # 拦截窗口关闭按钮（X），弹出保存确认对话框
+        # 如果不注册，点 X 会直接关闭，未保存的数据丢失
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    # 【Python 知识点：类型注解 self._entries: list[BillEntry]】
+    # 这行告诉程序员 self._entries 是一个 BillEntry 对象的列表。
+    # Python 运行时不检查类型，但 IDE 会根据这个注解提供智能提示。
+    #
+    # 【Python 知识点：self.root.protocol("WM_DELETE_WINDOW", self._on_close)】
+    # tkinter 的事件绑定：当用户点击窗口 X 按钮时，不执行默认的关闭操作，
+    # 而是调用 self._on_close 方法。这是"事件驱动编程"的典型用法。
+
+
+# ============================================================
+#  _build_ui() —— 构建标签页容器（第 166-186 行）
+# ============================================================
+#
+#  主界面结构：
+#  主窗口 (root)
+#      └── 标签页容器 (notebook)
+#          ├── 标签页1：记一笔    → _build_add_tab()
+#          ├── 标签页2：收支流水  → _build_list_tab()
+#          ├── 标签页3：月度统计  → _build_stats_tab()
+#          └── 标签页4：设置      → _build_settings_tab()
+#
+#  【Python 知识点：ttk.Notebook】
+#  Notebook 是标签页容器，类似浏览器的多标签页。
+#  每个标签页是一个独立的 Frame，通过 notebook.add() 添加。
+#
+# ============================================================
+
+    def _build_ui(self):
+        self.notebook = ttk.Notebook(self.root, bootstyle="primary")
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # 依次构建 4 个标签页
+        self._build_add_tab()      # 记一笔
+        self._build_list_tab()     # 收支流水
+        self._build_stats_tab()    # 月度统计
+        self._build_settings_tab() # 设置
+
+
+# ============================================================
+#  标签页 1：记一笔 —— 你看到一个表单和一个"保存"按钮
+# ============================================================
+#
+#  界面布局：
+#  ┌──────────────────────────────────────┐
+#  │  记录一笔收支                        │
+#  │  日期:  [2026-05-20]                │
+#  │  类型:  ( ) 收入  (●) 支出          │
+#  │  分类:  [餐饮 ▼]                    │
+#  │  金额（元）:  [         ]           │
+#  │  备注:  [         ]                 │
+#  │  [保存]                             │
+#  └──────────────────────────────────────┘
+#
+# ============================================================
+
+    # --------------------------------------------------------
+    #  _build_add_tab() —— 构建"记一笔"标签页（第 192-250 行）
+    # --------------------------------------------------------
+    #
+    #  界面上有这些输入控件：
+    #  - 日期（文本框，默认今天）
+    #  - 类型（单选按钮：收入 / 支出）
+    #  - 分类（下拉框，选项随类型切换）
+    #  - 金额（文本框）
+    #  - 备注（文本框）
+    #  - 保存按钮（点击后触发 _on_save_entry）
+    #
+    #  【Python 知识点：FormRow 组件】
+    #  FormRow 是 ui_components.py 中的自定义组件，封装了"标签 + 输入控件"。
+    #  有两种模式：widget_type="entry"（文本框，默认）和 widget_type="combobox"（下拉框）。
+    #  通过 set_value() / get_value() / clear() 操作数据。
+    #
+    # --------------------------------------------------------
+
+    def _build_add_tab(self):
+        tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(tab, text="  记一笔  ")
+
+        # 标题
+        ttk.Label(tab, text="记录一笔收支", font=get_font("title", "bold")).pack(
+            anchor="w", pady=(0, 20)
+        )
+
+        # 日期（默认今天）
+        self.add_date = FormRow(tab, label="日期:")
+        self.add_date.set_value(get_today())
+        self.add_date.pack(fill="x", pady=5)
+
+        # 支支类型（单选按钮）
+        # 【Python 知识点：tk.StringVar】
+        # StringVar 是 tkinter 的变量绑定对象。当用户点击单选按钮时，
+        # add_type 的值会自动更新为 "income" 或 "expense"。
+        # 通过 add_type.get() 可以获取当前选中的值。
+        type_frame = ttk.Frame(tab)
+        type_frame.pack(fill="x", pady=5)
+        ttk.Label(type_frame, text="类型:", width=10, anchor="e").pack(side="left", padx=(0, 8))
+        self.add_type = tk.StringVar(value=TYPE_EXPENSE)
+        ttk.Radiobutton(
+            type_frame, text="支出", variable=self.add_type,
+            value=TYPE_EXPENSE, command=self._on_type_change
+        ).pack(side="left", padx=(0, 16))
+        ttk.Radiobutton(
+            type_frame, text="收入", variable=self.add_type,
+            value=TYPE_INCOME, command=self._on_type_change
+        ).pack(side="left")
+
+        # 分类下拉框（选项在 _on_type_change 中按频率排序）
+        self.add_category = FormRow(tab, label="分类:", widget_type="combobox")
+        self.add_category.pack(fill="x", pady=5)
+        self._on_type_change()  # 初始化分类列表
+
+        # 金额
+        self.add_amount = FormRow(tab, label="金额（元）:")
+        self.add_amount.pack(fill="x", pady=5)
+
+        # 备注
+        self.add_note = FormRow(tab, label="备注:")
+        self.add_note.pack(fill="x", pady=5)
+
+        # 保存按钮
+        btn_frame = ttk.Frame(tab)
+        btn_frame.pack(fill="x", pady=(20, 0))
+        ttk.Button(
+            btn_frame, text="保存", bootstyle="success",
+            command=self._on_save_entry, width=12
+        ).pack(side="left", padx=(78, 0))
+
+    # 【Python 知识点：command=self._on_save_entry】
+    # 这是"回调函数"：不加括号，只传函数名。
+    # 加括号 self._on_save_entry() 会立即执行函数；
+    # 不加括号 self._on_save_entry 是传递函数引用，等用户点击时才执行。
+
+    # --------------------------------------------------------
+    #  _on_type_change() —— 分类频率排序（第 252-276 行）
+    # --------------------------------------------------------
+    #
+    #  用户点击"收入"或"支出"单选按钮时触发。
+    #  统计历史数据中各分类的使用次数，按频率降序排列。
+    #  "其他"始终排在最后（兜底选项不应出现在最前面）。
+    #
+    #  【为什么按频率排序？】
+    #  如果你经常记"餐饮"支出，餐饮会排在下拉框最前面，
+    #  不用每次滚动去找，提高记账效率。
+    #
+    #  【Python 知识点：lambda + sorted 的 key 参数】
+    #  key=lambda c: (c == "其他", -freq.get(c, 0))
+    #  这个 lambda 接收一个分类名 c，返回一个元组 (是不是其他, -使用次数)。
+    #  Python 排序元组时，先比较第一个元素，再比较第二个。
+    #  c == "其他" 为 True 时排在后面（True > False）；
+    #  -freq.get(c, 0) 为负数，使用次数越多，负数越小，排在越前面。
+    #
+    # --------------------------------------------------------
+
+    def _on_type_change(self):
+        entry_type = self.add_type.get()  # 获取当前选中的类型（"income" 或 "expense"）
+        default_cats = INCOME_CATEGORIES if entry_type == TYPE_INCOME else EXPENSE_CATEGORIES
+
+        # 统计当前工作副本中各分类的使用次数
+        freq: dict[str, int] = {}
+        for e in self._entries:
+            if e.type == entry_type:
+                freq[e.category] = freq.get(e.category, 0) + 1
+
+        # 按频率降序排列，"其他"始终排在最后
+        sorted_cats = sorted(
+            default_cats,
+            key=lambda c: (c == "其他", -freq.get(c, 0)),
+        )
+
+        # 更新下拉框选项
+        self.add_category.widget["values"] = sorted_cats
+        self.add_category.set_value(sorted_cats[0])
+
+    # --------------------------------------------------------
+    #  _on_save_entry() —— 核心数据流（第 278-324 行）★ 最重要
+    # --------------------------------------------------------
+    #
+    #  这是整个程序最核心的方法。用户点击"保存"按钮后，
+    #  数据从界面控件 → 校验 → 构造对象 → 存入内存工作副本。
+    #
+    #  【缓冲保存模式】
+    #  新记录只追加到 self._entries（内存工作副本），不立即写盘。
+    #  用户关闭程序时会弹出确认对话框，选择"保存"才写入磁盘。
+    #
+    #  完整数据流：
+    #  用户点击 [保存]
+    #      │
+    #      ▼
+    #  从界面控件取值（字符串）
+    #      │
+    #      ▼
+    #  validate_amount() 校验金额格式 ← utils.py
+    #      │
+    #      ├─ 失败 → show_error() 弹窗提示 → 函数返回
+    #      │
+    #      ▼
+    #  get_next_id() 计算新编号 ← storage.py
+    #      │
+    #      ▼
+    #  构造 BillEntry 对象 ← models.py
+    #      │
+    #      ▼
+    #  entry.validate() 校验业务规则 ← models.py
+    #      │
+    #      ├─ 失败 → show_error() 弹窗提示 → 函数返回
+    #      │
+    #      ▼
+    #  self._entries.append(entry) ← 追加到内存工作副本
+    #  self._has_changes = True    ← 标记有未保存的改动
+    #      │
+    #      ▼
+    #  _clear_add_form() ← 清空表单
+    #  _refresh_list()   ← 刷新界面
+    #
+    # --------------------------------------------------------
+
+    def _on_save_entry(self):
+        # ---- 第一步：从界面控件取值（都是字符串） ----
+        date_str = self.add_date.get_value()    # 日期文本框
+        entry_type = self.add_type.get()         # "income" 或 "expense"
+        category = self.add_category.get_value() # 下拉框选中的分类
+        amount_str = self.add_amount.get_value() # 金额文本框（字符串）
+        note = self.add_note.get_value()         # 备注文本框
+
+        # ---- 第二步：校验金额格式（调 utils.py 的纯函数） ----
+        # validate_amount 会检查：是不是数字？> 0？最多两位小数？
+        ok, amount = validate_amount(amount_str)
+        if not ok:
+            show_error("输入错误", f"金额格式不正确：'{amount_str}'\n请输入正数，最多两位小数。")
+            return  # 校验失败，提前返回，不往下走
+
+        # ---- 第三步：从内存工作副本计算新编号 ----
+        # 【Python 知识点：为什么不从磁盘读？】
+        # 因为缓冲保存模式下，磁盘上的数据可能不是最新的。
+        # 新增的记录只在内存中，所以从 self._entries 计算编号。
+        new_id = self.storage.get_next_id(self._entries)
+
+        # ---- 第四步：构造 BillEntry 对象（调 models.py） ----
+        # 【Python 知识点：@dataclass 的 __init__】
+        # BillEntry 是 @dataclass，所以可以直接用关键字参数创建对象。
+        # 相当于自动执行了：
+        #   self.id = id; self.date = date; self.type = type; ...
+        entry = BillEntry(
+            id=new_id, date=date_str, type=entry_type,
+            category=category, amount=amount, note=note,
+        )
+
+        # ---- 第五步：校验业务规则（调 models.py 的 validate） ----
+        # 检查：日期格式对不对？类型合不合法？金额是不是正数？分类空不空？
+        valid, msg = entry.validate()
+        if not valid:
+            show_error("数据错误", msg)
+            return  # 校验失败，提前返回
+
+        # ---- 第六步：追加到内存工作副本（不写盘，关闭时统一保存） ----
+        self._entries.append(entry)
+        self._has_changes = True  # 标记有未保存的改动
+        show_info("成功", f"已记录！编号: {new_id}")
+        self._clear_add_form()   # 清空表单，方便记下一笔
+        self._refresh_list()     # 刷新"收支流水"标签页的表格
+
+    # 【为什么这里不直接写盘？】
+    # 缓冲保存模式的好处：
+    # 1. 减少磁盘 I/O（每次保存都写盘很慢）
+    # 2. 支持"不保存"（用户可以关闭程序时选择不保存）
+    # 3. 支持撤回删除（删除只在内存中，可以恢复）
+
+    # --------------------------------------------------------
+    #  _clear_add_form() —— 清空表单（第 326-335 行）
+    # --------------------------------------------------------
+    #
+    #  保存成功后调用，方便用户立即记下一笔账。
+    #  日期重置为今天，类型重置为"支出"，金额和备注清空。
+    #
+    # --------------------------------------------------------
+
+    def _clear_add_form(self):
+        self.add_date.set_value(get_today())  # 日期重置为今天
+        self.add_type.set(TYPE_EXPENSE)       # 类型重置为"支出"
+        self._on_type_change()                # 分类列表跟着切换（因为类型变了）
+        self.add_amount.clear()               # 清空金额
+        self.add_note.clear()                 # 清空备注
+
+
+# ============================================================
+#  标签页 2：收支流水 —— 你看到一个表格和几个按钮
+# ============================================================
+#
+#  界面布局：
+#  ┌──────────────────────────────────────────────────┐
+#  │  收入合计     支出合计     结余      [刷新]       │
+#  │  +1000.00    -586.00     +414.00                │
+#  │                                                  │
+#  │  编号  日期      类型  分类    金额     备注      │
+#  │  1    2026-05-19 收入  红包  +1000.00  妈妈      │
+#  │  2    2026-05-20 支出  购物   -473.00  京东白条   │
+#  │  3    2026-05-20 支出  购物    -28.00  花呗      │
+#  │  ...                                             │
+#  │                                                  │
+#  │  [删除选中记录]  [撤回删除]           共 6 条记录  │
+#  └──────────────────────────────────────────────────┘
+#
+#  功能：
+#  - 三个统计卡片：实时显示收入合计、支出合计、结余
+#  - 数据表格：显示所有账单记录，收入绿色、支出红色
+#  - 右键菜单：右键点击表格行弹出"删除此记录"
+#  - 删除按钮：删除选中的记录（缓冲删除，可撤回）
+#  - 撤回按钮：恢复最近一次删除的记录（LIFO 栈）
+#
+# ============================================================
+
+    # --------------------------------------------------------
+    #  _build_list_tab() —— 构建"收支流水"标签页（第 341-396 行）
+    # --------------------------------------------------------
+    #
+    #  【Python 知识点：StatsCard 组件】
+    #  StatsCard 是 ui_components.py 中的自定义组件，
+    #  显示一个标题 + 数值的卡片。通过 update_value() 更新数值和颜色。
+    #
+    #  【Python 知识点：DataTable 组件】
+    #  DataTable 是 ui_components.py 中的自定义组件，
+    #  封装了 tkinter 的 Treeview（表格控件）。
+    #  delete_callback 参数传入回调函数后，会启用右键删除菜单。
+    #
+    # --------------------------------------------------------
+
+    def _build_list_tab(self):
+        tab = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab, text="  收支流水  ")
+
+        # 顶部统计栏
+        stats_frame = ttk.Frame(tab)
+        stats_frame.pack(fill="x", pady=(0, 10))
+
+        self.list_income_card = StatsCard(stats_frame, title="收入合计", value="+0.00")
+        self.list_income_card.pack(side="left", padx=(0, 10))
+
+        self.list_expense_card = StatsCard(stats_frame, title="支出合计", value="-0.00")
+        self.list_expense_card.pack(side="left", padx=(0, 10))
+
+        self.list_balance_card = StatsCard(stats_frame, title="结余", value="0.00")
+        self.list_balance_card.pack(side="left")
+
+        # 刷新按钮
+        ttk.Button(
+            stats_frame, text="刷新", bootstyle="info-outline",
+            command=self._refresh_list
+        ).pack(side="right")
+
+        # 数据表格（传入 delete_callback 启用右键删除菜单）
+        self.list_table = DataTable(
+            tab, columns=TABLE_COLUMNS,
+            delete_callback=self._on_delete_entry,
+        )
+        self.list_table.pack(fill="both", expand=True)
+
+        # 底部操作栏
+        action_frame = ttk.Frame(tab)
+        action_frame.pack(fill="x", pady=(10, 0))
+
+        ttk.Button(
+            action_frame, text="删除选中记录", bootstyle="danger-outline",
+            command=self._on_delete_entry
+        ).pack(side="left")
+
+        # 撤回删除按钮（初始禁用，有删除记录时启用）
+        self.undo_btn = ttk.Button(
+            action_frame, text="撤回删除", bootstyle="warning-outline",
+            command=self._on_undo_delete, state="disabled",
+        )
+        self.undo_btn.pack(side="left", padx=(10, 0))
+
+        self.list_count_label = ttk.Label(action_frame, text="共 0 条记录", font=get_font("small"))
+        self.list_count_label.pack(side="right")
+
+    # --------------------------------------------------------
+    #  _refresh_list() —— 从内存工作副本刷新界面（第 398-431 行）
+    # --------------------------------------------------------
+    #
+    #  调用时机：
+    #  - 程序启动时（run() 中调用）
+    #  - 保存新记录后（_on_save_entry 中调用）
+    #  - 删除记录后（_on_delete_entry 中调用）
+    #  - 撤回删除后（_on_undo_delete 中调用）
+    #  - 用户点击"刷新"按钮
+    #
+    #  【为什么不从磁盘读？】
+    #  因为缓冲保存模式下，磁盘上的数据可能不是最新的。
+    #  新增或删除的记录只在内存中，所以从 self._entries 读取。
+    #
+    #  【Python 知识点：列表推导式 + sum()】
+    #  total_income = sum(e.amount for e in entries if e.type == TYPE_INCOME)
+    #  这行代码的含义：遍历所有记录，筛选出收入类型，取出金额，求和。
+    #  等价于：
+    #    total_income = 0
+    #    for e in entries:
+    #        if e.type == TYPE_INCOME:
+    #            total_income += e.amount
+    #
+    # --------------------------------------------------------
+
+    def _refresh_list(self):
+        # 从内存工作副本读取（不从磁盘加载，避免覆盖未保存的改动）
+        entries = self._entries
+
+        # 把数据填充到表格组件
+        self.list_table.load_data(entries)
+
+        # 计算统计数据（列表推导式，一行搞定）
+        total_income = sum(e.amount for e in entries if e.type == TYPE_INCOME)
+        total_expense = sum(e.amount for e in entries if e.type == TYPE_EXPENSE)
+        balance = total_income - total_expense
+
+        # 更新顶部的三个统计卡片
+        self.list_income_card.update_value(f"+{format_amount(total_income)}", COLOR_SUCCESS)
+        self.list_expense_card.update_value(f"-{format_amount(total_expense)}", COLOR_DANGER)
+        balance_color = COLOR_SUCCESS if balance >= 0 else COLOR_DANGER
+        balance_sign = "+" if balance >= 0 else ""
+        self.list_balance_card.update_value(f"{balance_sign}{format_amount(balance)}", balance_color)
+        self.list_count_label.config(text=f"共 {len(entries)} 条记录")
+
+    # --------------------------------------------------------
+    #  _on_delete_entry() —— 缓冲删除 + 撤回栈（第 433-476 行）
+    # --------------------------------------------------------
+    #
+    #  删除一条记录：从内存工作副本中移除，压入撤回栈。
+    #  不立即写盘，用户关闭程序时统一保存。
+    #
+    #  支持两种触发方式：
+    #  1. 按钮点击：从表格选中行获取 entry_id
+    #  2. 右键菜单：直接传入 entry_id
+    #
+    #  【Python 知识点：for-else 语句】
+    #  for e in self._entries:
+    #      if e.id == entry_id:
+    #          deleted_entry = e
+    #      else:
+    #          remaining.append(e)
+    #  这里没有用 for-else，而是用两个列表（remaining 和 deleted_entry）
+    #  来分离"要保留的"和"要删除的"记录。
+    #
+    # --------------------------------------------------------
+
+    def _on_delete_entry(self, entry_id: int = None):
+        # ① 确定要删除的记录编号
+        # 【Python 知识点：默认参数 entry_id=None】
+        # 如果调用时没传参数，entry_id 就是 None，从表格选中行获取。
+        # 如果右键菜单调用，会传入具体的 entry_id。
+        if entry_id is None:
+            entry_id = self.list_table.get_selected_id()
+        if entry_id is None:
+            show_info("提示", "请先选中要删除的记录。")
+            return
+
+        # ② 二次确认（防误删）
+        if not show_confirm("确认删除", f"确定要删除编号 {entry_id} 的记录吗？\n可通过「撤回删除」按钮恢复。"):
+            return
+
+        # ③ 从内存工作副本中找到并移除目标记录，压入撤回栈
+        deleted_entry = None
+        remaining = []
+        for e in self._entries:
+            if e.id == entry_id:
+                deleted_entry = e      # 找到目标，记录下来
+            else:
+                remaining.append(e)    # 不是目标，保留
+
+        if deleted_entry is None:
+            show_info("提示", f"未找到编号 {entry_id} 的记录。")
+            return
+
+        # ④ 更新工作副本和撤回栈
+        self._entries = remaining                    # 更新工作副本（移除了目标记录）
+        self._undo_stack.append(deleted_entry)       # 压入撤回栈（支持撤回）
+        self._has_changes = True                     # 标记有未保存的改动
+
+        show_info("成功", f"已删除编号 {entry_id} 的记录。可通过「撤回删除」恢复。")
+        self._refresh_list()               # ⑤ 刷新界面
+        self._update_undo_button_state()   # ⑥ 更新撤回按钮状态
+
+    # 【为什么用两个列表而不是直接 remove？】
+    # list.remove() 只能删除第一个匹配项，如果有重复 id 会出问题。
+    # 用两个列表分离"保留"和"删除"更清晰、更安全。
+
+    # --------------------------------------------------------
+    #  _on_undo_delete() —— 撤回最近一次删除（第 478-500 行）
+    # --------------------------------------------------------
+    #
+    #  从撤回栈弹出最近删除的记录，恢复到内存工作副本。
+    #
+    #  【Python 知识点：LIFO 栈（后进先出）】
+    #  self._undo_stack 是一个 Python 列表，用 append/pop 实现 LIFO。
+    #  - append(记录)：压入栈顶
+    #  - pop()：弹出栈顶（最近删除的记录）
+    #  最后删除的记录最先被恢复（符合直觉）。
+    #
+    #  【如果连续删除 3 条记录再撤回，会怎样？】
+    #  第一次撤回 → 恢复第 3 条（最后删的）
+    #  第二次撤回 → 恢复第 2 条
+    #  第三次撤回 → 恢复第 1 条
+    #  撤回按钮变回禁用（栈空了）
+    #
+    # --------------------------------------------------------
+
+    def _on_undo_delete(self):
+        if not self._undo_stack:
+            show_info("提示", "没有可撤回的删除记录。")
+            return
+
+        # 从撤回栈弹出最近删除的记录
+        entry = self._undo_stack.pop()
+        # 恢复到内存工作副本
+        self._entries.append(entry)
+        self._has_changes = True
+
+        show_info("撤回成功", f"已恢复编号 {entry.id} 的记录：{entry.category} {entry.amount:.2f} 元")
+        self._refresh_list()
+        self._update_undo_button_state()
+
+    # --------------------------------------------------------
+    #  _update_undo_button_state() —— 更新撤回按钮状态（第 502-513 行）
+    # --------------------------------------------------------
+    #
+    #  根据撤回栈是否为空，启用或禁用"撤回删除"按钮。
+    #  栈空 → 按钮禁用（灰色），栈非空 → 按钮启用。
+    #
+    #  【Python 知识点：config(state=...)】
+    #  tkinter 组件的 config() 方法可以动态修改属性。
+    #  state="disabled" 禁用组件（灰色，不可点击），state="normal" 启用。
+    #
+    # --------------------------------------------------------
+
+    def _update_undo_button_state(self):
+        if self._undo_stack:
+            self.undo_btn.config(state="normal")     # 栈非空 → 启用
+        else:
+            self.undo_btn.config(state="disabled")    # 栈空 → 禁用
+
+    # --------------------------------------------------------
+    #  _on_close() —— 窗口关闭确认（第 515-545 行）
+    # --------------------------------------------------------
+    #
+    #  用户点击窗口 X 按钮时触发。
+    #  如果有未保存的改动，弹出三选一对话框：
+    #  - 保存：将内存工作副本写入磁盘后关闭
+    #  - 不保存：丢弃本次运行的所有改动，直接关闭
+    #  - 取消：不关闭窗口，返回程序继续操作
+    #
+    #  【Python 知识点：messagebox.askyesnocancel()】
+    #  返回值：
+    #  - True  → 用户选"是"（保存）
+    #  - False → 用户选"否"（不保存）
+    #  - None  → 用户选"取消"
+    #
+    #  【什么是"原子写入"？】
+    #  不直接写 accounts.json，而是：
+    #  ① 先写到 accounts.json.tmp（临时文件）
+    #  ② 写成功后，用 os.replace() 把 tmp 替换掉原文件
+    #  os.replace() 是操作系统级别的原子操作——
+    #  要么完全替换成功，要么完全不替换，不存在"替换到一半"的状态。
+    #  这样即使写到一半断电，原文件仍然完好。
+    #
+    # --------------------------------------------------------
+
+    def _on_close(self):
+        if not self._has_changes:
+            # 没有未保存的改动，直接关闭
+            self.root.destroy()
+            return
+
+        # 有未保存的改动，弹出三选一对话框
+        result = messagebox.askyesnocancel(
+            "保存确认",
+            "本次运行有未保存的记录改动，是否保存？\n\n"
+            "「是」保存并关闭\n「否」不保存直接关闭\n「取消」返回程序",
+        )
+
+        if result is True:
+            # 用户选择"保存" → 写盘后关闭
+            if self.storage.save_all(self._entries):
+                self.root.destroy()
+            else:
+                show_error("错误", "保存失败，请检查磁盘空间或文件权限。")
+        elif result is False:
+            # 用户选择"不保存" → 丢弃改动，直接关闭
+            self.root.destroy()
+        # result is None → 用户选择"取消" → 不做任何操作，返回程序
+
+
+# ============================================================
+#  标签页 3：月度统计 —— 你看到年月下拉框和统计表格
+# ============================================================
+#
+#  界面布局：
+#  ┌──────────────────────────────────────────────────┐
+#  │  月度收支统计                                     │
+#  │  年份: [2026 ▼]  月份: [5 ▼]  [查询]             │
+#  │                                                  │
+#  │  收入合计     支出合计     月度结余               │
+#  │  +1000.00    -586.00     +414.00                │
+#  │                                                  │
+#  │  分类      笔数      金额                        │
+#  │  红包        1      +1000.00                     │
+#  │  购物        2       -501.00                     │
+#  │  餐饮        2        -35.00                     │
+#  │  其他        1        -50.00                     │
+#  └──────────────────────────────────────────────────┘
+#
+#  功能：
+#  - 年月下拉框：选择要查询的月份
+#  - 查询按钮：从内存工作副本筛选本月记录并聚合统计
+#  - 三个统计卡片：收入合计、支出合计、月度结余
+#  - 分类汇总表格：每个分类的笔数和金额（用 _StatsRow 适配器）
+#
+# ============================================================
+
+    # --------------------------------------------------------
+    #  _build_stats_tab() —— 构建"月度统计"标签页（第 551-613 行）
+    # --------------------------------------------------------
+    #
+    #  【Python 知识点：datetime.now()】
+    #  获取当前日期时间。.year 获取年份，.month 获取月份。
+    #  用于设置年月下拉框的默认值。
+    #
+    #  【Python 知识点：range() 生成数字序列】
+    #  range(current_year - 5, current_year + 2) 生成 [当前年-5, 当前年+6) 的整数。
+    #  range(1, 13) 生成 [1, 13) 即 1-12 月。
+    #  列表推导式 [str(y) for y in range(...)] 把整数转为字符串。
+    #
+    # --------------------------------------------------------
+
+    def _build_stats_tab(self):
+        tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(tab, text="  月度统计  ")
+
+        # 标题
+        ttk.Label(tab, text="月度收支统计", font=get_font("title", "bold")).pack(
+            anchor="w", pady=(0, 16)
+        )
+
+        # 年月选择器
+        selector_frame = ttk.Frame(tab)
+        selector_frame.pack(fill="x", pady=(0, 16))
+
+        ttk.Label(selector_frame, text="年份:", font=get_font("body")).pack(side="left")
+        current_year = datetime.now().year
+        self.stats_year = ttk.Combobox(
+            selector_frame, state="readonly", width=6,
+            values=[str(y) for y in range(current_year - 5, current_year + 2)]
+        )
+        self.stats_year.set(str(current_year))
+        self.stats_year.pack(side="left", padx=(4, 16))
+
+        ttk.Label(selector_frame, text="月份:", font=get_font("body")).pack(side="left")
+        self.stats_month = ttk.Combobox(
+            selector_frame, state="readonly", width=4,
+            values=[str(m) for m in range(1, 13)]
+        )
+        self.stats_month.set(str(datetime.now().month))
+        self.stats_month.pack(side="left", padx=(4, 16))
+
+        ttk.Button(
+            selector_frame, text="查询", bootstyle="primary",
+            command=self._on_query_stats
+        ).pack(side="left")
+
+        # 统计卡片
+        stats_cards_frame = ttk.Frame(tab)
+        stats_cards_frame.pack(fill="x", pady=(0, 16))
+
+        self.stats_income_card = StatsCard(stats_cards_frame, title="收入合计", value="+0.00")
+        self.stats_income_card.pack(side="left", padx=(0, 10))
+
+        self.stats_expense_card = StatsCard(stats_cards_frame, title="支出合计", value="-0.00")
+        self.stats_expense_card.pack(side="left", padx=(0, 10))
+
+        self.stats_balance_card = StatsCard(stats_cards_frame, title="月度结余", value="0.00")
+        self.stats_balance_card.pack(side="left")
+
+        # 分类汇总表格（复用 DataTable，但列定义不同）
+        self.stats_table = DataTable(tab, columns={
+            "category": {"text": "分类", "width": 120, "anchor": "center"},
+            "count":    {"text": "笔数", "width": 80,  "anchor": "center"},
+            "amount":   {"text": "金额", "width": 120, "anchor": "e"},
+        })
+        self.stats_table.pack(fill="both", expand=True)
+
+    # --------------------------------------------------------
+    #  _on_query_stats() —— 月度统计查询（第 615-682 行）
+    # --------------------------------------------------------
+    #
+    #  数据流：内存工作副本 → 筛选本月记录 → 按分类聚合 → 显示。
+    #
+    #  【Python 知识点：字典聚合统计】
+    #  income_by_cat: dict[str, tuple[int, float]] = {}
+    #  这是一个字典，key 是分类名（如"餐饮"），value 是 (笔数, 金额合计) 元组。
+    #  遍历所有记录，按分类累加，实现"分组求和"。
+    #
+    #  【Python 知识点：字符串比较实现日期筛选】
+    #  "YYYY-MM-DD" 格式的日期字符串天然支持字典序比较：
+    #  "2026-05-01" < "2026-05-15" < "2026-05-31"
+    #  所以可以用 start <= e.date <= end 来筛选本月记录。
+    #
+    #  【Python 知识点：_StatsRow 适配器】
+    #  月度统计表格复用了 DataTable，但统计数据不是 BillEntry。
+    #  用 _StatsRow 把 (分类, 笔数, 金额) 包装成 DataTable 能识别的格式。
+    #  这就是"适配器模式"——让两个接口不匹配的模块协作。
+    #
+    # --------------------------------------------------------
+
+    def _on_query_stats(self):
+        # 获取用户选择的年月
+        try:
+            year = int(self.stats_year.get())
+            month = int(self.stats_month.get())
+        except ValueError:
+            show_error("错误", "请选择有效的年月。")
+            return
+
+        # 算出该月的起止日期（调 utils.py）
+        start, end = get_month_range(year, month)
+        # 从内存工作副本读取（与收支流水标签页保持一致）
+        entries = self._entries
+        # 筛选本月的记录
+        month_entries = [e for e in entries if start <= e.date <= end]
+
+        if not month_entries:
+            self.stats_table.clear()
+            self.stats_income_card.update_value("+0.00")
+            self.stats_expense_card.update_value("-0.00")
+            self.stats_balance_card.update_value("0.00")
+            show_info("提示", f"{year}年{month}月暂无记录。")
+            return
+
+        # ---- 按分类聚合：把本月记录按"收入分类"和"支出分类"分别汇总 ----
+        # 【Python 知识点：dict.get(key, default)】
+        # income_by_cat.get(entry.category, (0, 0.0))
+        # 如果 entry.category 已经在字典中，返回 (笔数, 金额)；
+        # 如果不在，返回默认值 (0, 0.0)。避免 KeyError。
+        income_by_cat: dict[str, tuple[int, float]] = {}
+        expense_by_cat: dict[str, tuple[int, float]] = {}
+
+        for entry in month_entries:
+            if entry.type == TYPE_INCOME:
+                count, amt = income_by_cat.get(entry.category, (0, 0.0))
+                income_by_cat[entry.category] = (count + 1, amt + entry.amount)
+            else:
+                count, amt = expense_by_cat.get(entry.category, (0, 0.0))
+                expense_by_cat[entry.category] = (count + 1, amt + entry.amount)
+
+        total_income = sum(amt for _, amt in income_by_cat.values())
+        total_expense = sum(amt for _, amt in expense_by_cat.values())
+        balance = total_income - total_expense
+
+        # 更新统计卡片
+        self.stats_income_card.update_value(f"+{format_amount(total_income)}", COLOR_SUCCESS)
+        self.stats_expense_card.update_value(f"-{format_amount(total_expense)}", COLOR_DANGER)
+        balance_color = COLOR_SUCCESS if balance >= 0 else COLOR_DANGER
+        balance_sign = "+" if balance >= 0 else ""
+        self.stats_balance_card.update_value(f"{balance_sign}{format_amount(balance)}", balance_color)
+
+        # 构建表格数据（按金额降序排列）
+        rows = []
+        for cat, (count, amt) in sorted(income_by_cat.items(), key=lambda x: -x[1][1]):
+            rows.append(_StatsRow(cat, count, amt, TYPE_INCOME))
+        for cat, (count, amt) in sorted(expense_by_cat.items(), key=lambda x: -x[1][1]):
+            rows.append(_StatsRow(cat, count, amt, TYPE_EXPENSE))
+
+        self.stats_table.load_data(rows)
+
+
+# ============================================================
+#  标签页 4：设置 —— 你看到主题、字体、字号和两个危险按钮
+# ============================================================
+#
+#  界面布局：
+#  ┌──────────────────────────────────────────────────┐
+#  │  界面设置                                         │
+#  │                                                  │
+#  │  主题: [── 主题预设 ── ▼]                        │
+#  │    深色模式 / 护眼模式 / 海洋蓝                   │
+#  │    红色系 / 蓝绿色系 / 紫色系 / 暗色系 / 简约    │
+#  │                                                  │
+#  │  字体: [Microsoft YaHei ▼]                       │
+#  │  字号: [========●=====] 12                       │
+#  │                                                  │
+#  │  ┌ 预览 ─────────────────────────────┐           │
+#  │  │ 这是预览文字 - AaBbCc 123 收入 支出│           │
+#  │  └───────────────────────────────────┘           │
+#  │                                                  │
+#  │  [应用设置]                                      │
+#  │                                                  │
+#  │  ┌ 高级操作 ─────────────────────────┐           │
+#  │  │ [恢复系统设置] [重置软件]          │           │
+#  │  │ 恢复系统设置：重置字体/主题为默认值│           │
+#  │  │ 重置软件：删除所有数据并初始化     │           │
+#  │  └───────────────────────────────────┘           │
+#  └──────────────────────────────────────────────────┘
+#
+#  v1.3 新增功能：
+#  - THEME_PRESETS 主题预设系统（深色/护眼/海洋蓝，立即生效）
+#  - 预设与普通主题分离（预设立即生效，普通主题需重启）
+#  - 高级操作区（恢复系统设置 / 重置软件）
+#
+# ============================================================
+
+    # --------------------------------------------------------
+    #  _build_settings_tab() —— 构建"设置"标签页（第 688-822 行）
+    # --------------------------------------------------------
+    #
+    #  【THEME_PRESETS 主题预设系统（v1.3 新增）】
+    #  ttkbootstrap 的 18 个主题都是浅色系，彼此差异很小。
+    #  THEME_PRESETS 通过注入自定义颜色，让深色模式、护眼模式等
+    #  真正有视觉差异。
+    #
+    #  预设 vs 普通主题：
+    #  - 预设（深色/护眼/海洋蓝）：立即生效，通过 apply_preset() 注入颜色
+    #  - 普通主题（cosmo/darkly 等）：下次启动生效，通过 ttkbootstrap 主题切换
+    #
+    #  【Python 知识点：字典推导式构建映射】
+    #  self._theme_value_map = {}    # 显示名 → 英文主题名
+    #  self._preset_value_map = {}   # 显示名 → 预设名
+    #  通过遍历 PRESET_NAMES 和 THEME_GROUPS 构建两个映射字典。
+    #
+    #  【Python 知识点：分隔行防误选】
+    #  下拉框中的 "── 主题预设 ──" 等分隔行不是真正的主题选项，
+    #  选中后会导致主题名无效。_on_theme_select() 会拦截这种误操作。
+    #
+    # --------------------------------------------------------
+
+    def _build_settings_tab(self):
+        tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(tab, text="  设置  ")
+
+        # 标题
+        ttk.Label(tab, text="界面设置", font=get_font("title", "bold")).pack(
+            anchor="w", pady=(0, 20)
+        )
+
+        # 主题选择（预设 + 中文分组显示）
+        theme_frame = ttk.Frame(tab)
+        theme_frame.pack(fill="x", pady=5)
+        ttk.Label(theme_frame, text="主题:", width=10, anchor="e").pack(side="left", padx=(0, 8))
+
+        # 构建带分组标题的主题列表
+        # 【Python 知识点：两个映射字典】
+        # _theme_value_map: 普通主题的 显示名 → 英文名（如 "玫瑰(cosmo)" → "cosmo"）
+        # _preset_value_map: 预设的 显示名 → 预设名（如 "  深色模式" → "深色模式"）
+        self._theme_display_list = []
+        self._theme_value_map = {}
+        self._preset_value_map = {}
+
+        # 第一组：主题预设（深色/护眼等，有明显的颜色差异）
+        separator = "── 主题预设 ──"
+        self._theme_display_list.append(separator)
+        for preset_name in PRESET_NAMES:
+            display = f"  {preset_name}"
+            self._theme_display_list.append(display)
+            self._preset_value_map[display] = preset_name
+
+        # 第二组起：ttkbootstrap 主题（按颜色系分组）
+        for group_name, themes in THEME_GROUPS.items():
+            separator = f"── {group_name} ──"
+            self._theme_display_list.append(separator)
+            for cn_name, en_name in themes:
+                display = f"  {cn_name}({en_name})"
+                self._theme_display_list.append(display)
+                self._theme_value_map[display] = en_name
+
+        self.settings_theme = ttk.Combobox(
+            theme_frame, state="readonly", values=self._theme_display_list, width=20
+        )
+        # 根据当前设置的主题找到对应的中文显示名
+        current_theme = self._settings["theme"]
+        current_preset = self._settings.get("preset", "")
+        if current_preset:
+            # 当前是预设模式，找到预设的显示名
+            for display, name in self._preset_value_map.items():
+                if name == current_preset:
+                    self.settings_theme.set(display)
+                    break
+        else:
+            # 当前是普通主题模式
+            for display, en in self._theme_value_map.items():
+                if en == current_theme:
+                    self.settings_theme.set(display)
+                    break
+        self.settings_theme.pack(side="left")
+        # 选择分隔行时自动跳回上一个有效选项
+        self.settings_theme.bind("<<ComboboxSelected>>", self._on_theme_select)
+
+        # 字体族
+        font_frame = ttk.Frame(tab)
+        font_frame.pack(fill="x", pady=5)
+        ttk.Label(font_frame, text="字体:", width=10, anchor="e").pack(side="left", padx=(0, 8))
+
+        available_fonts = sorted(set(tkfont.families()))
+        self.settings_font = ttk.Combobox(
+            font_frame, state="readonly", values=available_fonts, width=20
+        )
+        self.settings_font.set(self._settings["font_family"])
+        self.settings_font.pack(side="left")
+
+        # 字号（滑块）
+        size_frame = ttk.Frame(tab)
+        size_frame.pack(fill="x", pady=5)
+        ttk.Label(size_frame, text="字号:", width=10, anchor="e").pack(side="left", padx=(0, 8))
+
+        self.settings_font_size = ttk.Scale(
+            size_frame, from_=10, to=24,
+            value=self._settings["font_size_body"],
+            bootstyle="info",
+        )
+        self.settings_font_size.pack(side="left", fill="x", expand=True)
+
+        self.size_label = ttk.Label(
+            size_frame, text=str(int(self._settings["font_size_body"])), width=4
+        )
+        self.size_label.pack(side="left", padx=(8, 0))
+        # 【Python 知识点：lambda 回调】
+        # 滑块拖动时，lambda 会把浮点数转为整数并更新标签文字。
+        # command=lambda v: ... 中的 v 是滑块当前值（浮点数）。
+        self.settings_font_size.configure(
+            command=lambda v: self.size_label.config(text=str(int(float(v))))
+        )
+
+        # 预览区域
+        preview_frame = ttk.Labelframe(tab, text="预览", padding=16)
+        preview_frame.pack(fill="x", pady=(20, 0))
+
+        self.preview_label = ttk.Label(
+            preview_frame,
+            text="这是预览文字 - AaBbCc 123 收入 支出 餐饮 工资",
+            font=get_font("body"),
+        )
+        self.preview_label.pack(anchor="w")
+
+        # 应用按钮
+        ttk.Button(
+            tab, text="应用设置", bootstyle="primary",
+            command=self._on_apply_settings
+        ).pack(anchor="w", pady=(20, 0))
+
+        # 危险操作区（恢复默认设置 / 重置软件）
+        danger_frame = ttk.Labelframe(tab, text="高级操作", padding=16)
+        danger_frame.pack(fill="x", pady=(20, 0))
+
+        ttk.Button(
+            danger_frame, text="恢复系统设置", bootstyle="warning-outline",
+            command=self._on_restore_settings
+        ).pack(side="left", padx=(0, 10))
+
+        ttk.Button(
+            danger_frame, text="重置软件", bootstyle="danger-outline",
+            command=self._on_reset_software
+        ).pack(side="left")
+
+        ttk.Label(
+            danger_frame, text="恢复系统设置：重置字体/主题为默认值\n重置软件：删除所有数据并初始化",
+            font=get_font("small"), bootstyle="secondary",
+        ).pack(side="left", padx=(16, 0))
+
+    # --------------------------------------------------------
+    #  _on_apply_settings() —— 应用设置（第 824-897 行）
+    # --------------------------------------------------------
+    #
+    #  用户选择主题/字体/字号，点击"应用设置"后触发。
+    #
+    #  【两种模式】
+    #  预设模式（深色/护眼/海洋蓝）：立即生效
+    #    → apply_preset() 注入自定义颜色到 ttkbootstrap 样式
+    #    → apply_preset_to_root() 递归设置 tk 原生组件颜色
+    #
+    #  普通主题（cosmo/darkly 等）：下次启动生效
+    #    → 只更新 theme.THEME_NAME，不运行时切换主题
+    #
+    #  【Python 知识点：isinstance 判断类型】
+    #  这里用 is_preset = theme_display in self._preset_value_map
+    #  来判断选中的是预设还是普通主题。如果在 _preset_value_map 中，
+    #  就是预设；否则是普通主题。
+    #
+    # --------------------------------------------------------
+
+    def _on_apply_settings(self):
+        # 从下拉框解析选中值
+        theme_display = self.settings_theme.get()
+        new_font_family = self.settings_font.get()
+        new_font_size = int(float(self.settings_font_size.get()))
+
+        # 判断选中的是预设还是普通主题
+        is_preset = theme_display in self._preset_value_map
+        if is_preset:
+            preset_name = self._preset_value_map[theme_display]
+            new_theme = THEME_PRESETS[preset_name]["base_theme"]
+        else:
+            preset_name = ""
+            new_theme = self._theme_value_map.get(theme_display, "cosmo")
+
+        # ---- 第一步：更新 theme.py 模块变量 ----
+        theme.FONT_FAMILY = new_font_family
+        theme.FONT_SIZE_BODY = new_font_size
+        theme.FONT_SIZE_MAP["body"] = new_font_size
+        theme.FONT_SIZE_MAP["title"] = new_font_size + 6
+        theme.FONT_SIZE_MAP["subtitle"] = new_font_size + 2
+        theme.FONT_SIZE_MAP["small"] = new_font_size - 2
+        theme.THEME_NAME = new_theme
+
+        # ---- 第二步：更新全局样式 ----
+        apply_theme(self.style)
+        self.style.configure("Treeview", rowheight=new_font_size + 14)
+
+        # 如果是预设，立即应用自定义颜色（立即生效）
+        if is_preset:
+            apply_preset(preset_name, self.style)
+            apply_preset_to_root(self.root, preset_name)
+
+        # ---- 第三步：持久化设置到磁盘 ----
+        self._settings = {
+            "theme": new_theme,
+            "preset": preset_name,
+            "font_family": new_font_family,
+            "font_size_body": new_font_size,
+        }
+        save_settings(self._settings)
+
+        # ---- 第四步：更新预览标签 ----
+        self.preview_label.config(font=(new_font_family, new_font_size))
+
+        # ---- 第五步：提示用户 ----
+        if is_preset:
+            show_info(
+                "设置已保存",
+                f"预设: {preset_name}\n字体: {new_font_family}\n字号: {new_font_size}\n\n"
+                f"预设已立即生效。"
+            )
+        else:
+            show_info(
+                "设置已保存",
+                f"主题: {new_theme}\n字体: {new_font_family}\n字号: {new_font_size}\n\n"
+                f"字体和字号已立即生效。\n"
+                f"主题切换将在下次启动程序时生效。"
+            )
+
+    # 【为什么主题不能运行时切换？】
+    # ttkbootstrap 的主题切换涉及所有组件的底层样式重绘，
+    # 运行时切换会导致部分组件样式错乱。字体和字号可以运行时切换，
+    # 因为它们只影响文字渲染，不涉及组件结构。
+    #
+    # 【预设为什么能立即生效？】
+    # 预设不切换 ttkbootstrap 主题，而是在现有主题之上叠加自定义颜色。
+    # apply_preset() 用 style.configure() 修改颜色，不改变组件结构。
+    # apply_preset_to_root() 递归遍历 tk 原生组件，设置背景/前景色。
+
+    # --------------------------------------------------------
+    #  _on_theme_select() —— 分隔行防误选（第 899-914 行）
+    # --------------------------------------------------------
+    #
+    #  主题下拉框选择事件：若选中分隔行则自动跳回上一个有效选项。
+    #
+    #  【为什么需要这个方法？】
+    #  下拉框中的 "── 红色系 ──" 等分隔行不是真正的主题选项，
+    #  用户误点时应自动忽略，保持选中上一个有效主题。
+    #  否则 theme.THEME_NAME 会变成无效值，下次启动时程序崩溃。
+    #
+    #  【Python 知识点：str.startswith()】
+    #  "── 红色系 ──".startswith("──") → True
+    #  用于判断字符串是否以指定前缀开头。
+    #
+    # --------------------------------------------------------
+
+    def _on_theme_select(self, event=None):
+        current = self.settings_theme.get()
+        # 分隔行以 "──" 开头，不是有效选项
+        if current.startswith("──"):
+            # 找到上一个有效选项（预设或普通主题）
+            for display in reversed(self._theme_display_list):
+                if display in self._theme_value_map or display in self._preset_value_map:
+                    self.settings_theme.set(display)
+                    break
+
+    # --------------------------------------------------------
+    #  _on_restore_settings() —— 恢复系统设置（第 916-963 行）
+    # --------------------------------------------------------
+    #
+    #  将字体、主题等重置为默认值，不删除记账数据。
+    #
+    #  【数据流】
+    #  用户确认 → 用 DEFAULT_SETTINGS 覆盖 self._settings
+    #      → 更新 theme.py 模块变量
+    #      → 保存到 settings.json
+    #      → 更新界面控件显示
+    #      → 提示重启
+    #
+    #  【恢复系统设置 vs 重置软件 的区别】
+    #  恢复系统设置：只重置字体/主题等外观设置，记账数据完好
+    #  重置软件：删除所有数据（accounts.json + settings.json），不可恢复
+    #
+    # --------------------------------------------------------
+
+    def _on_restore_settings(self):
+        if not show_confirm(
+            "恢复系统设置",
+            "将恢复字体、主题等设置为默认值。\n记账数据不会被删除。\n\n确定继续吗？"
+        ):
+            return
+
+        # 用默认值覆盖当前设置
+        from theme import DEFAULT_SETTINGS
+        self._settings = dict(DEFAULT_SETTINGS)
+        self._settings["preset"] = ""  # 清除预设
+
+        # 更新 theme.py 模块变量
+        theme.FONT_FAMILY = self._settings["font_family"]
+        theme.FONT_SIZE_BODY = self._settings["font_size_body"]
+        theme.FONT_SIZE_MAP["body"] = self._settings["font_size_body"]
+        theme.FONT_SIZE_MAP["title"] = self._settings["font_size_body"] + 6
+        theme.FONT_SIZE_MAP["subtitle"] = self._settings["font_size_body"] + 2
+        theme.FONT_SIZE_MAP["small"] = self._settings["font_size_body"] - 2
+        theme.THEME_NAME = self._settings["theme"]
+
+        # 持久化到磁盘
+        save_settings(self._settings)
+
+        # 更新界面控件显示（反向查找主题的中文显示名）
+        default_theme = self._settings["theme"]
+        for display, en in self._theme_value_map.items():
+            if en == default_theme:
+                self.settings_theme.set(display)
+                break
+        self.settings_font.set(self._settings["font_family"])
+        self.settings_font_size.set(self._settings["font_size_body"])
+        self.size_label.config(text=str(self._settings["font_size_body"]))
+
+        show_info(
+            "已恢复默认设置",
+            "字体、主题等设置已恢复为默认值。\n请重启程序使主题生效。"
+        )
+
+    # --------------------------------------------------------
+    #  _on_reset_software() —— 重置软件（第 965-1009 行）
+    # --------------------------------------------------------
+    #
+    #  删除所有记账数据和设置文件，初始化软件。
+    #
+    #  【危险操作】此操作不可撤销！会删除：
+    #  - accounts.json（所有记账数据）
+    #  - settings.json（用户设置）
+    #
+    #  【安全措施】两次确认弹窗，防止误操作。
+    #
+    #  【Python 知识点：os.path.exists() + os.remove()】
+    #  os.path.exists(路径)：检查文件是否存在，返回 True/False
+    #  os.remove(路径)：删除文件。文件不存在会报错，所以先检查。
+    #
+    # --------------------------------------------------------
+
+    def _on_reset_software(self):
+        # 第一次确认
+        if not show_confirm(
+            "⚠ 重置软件",
+            "此操作将删除所有记账数据和设置！\n"
+            "此操作不可撤销！\n\n"
+            "确定要继续吗？"
+        ):
+            return
+
+        # 第二次确认（二次确认防误删）
+        if not show_confirm(
+            "⚠ 最终确认",
+            "真的要删除所有数据吗？\n\n"
+            "点击「是」将立即删除所有数据并关闭程序。"
+        ):
+            return
+
+        # 删除数据文件
+        import os
+        data_file = self.storage.file_path
+        settings_file = theme.SETTINGS_FILE
+
+        if os.path.exists(data_file):
+            os.remove(data_file)
+        if os.path.exists(settings_file):
+            os.remove(settings_file)
+
+        # 清空内存状态
+        self._entries = []
+        self._undo_stack = []
+        self._has_changes = False
+
+        show_info("重置完成", "所有数据已删除。程序将关闭，请重新启动。")
+        self.root.destroy()
+
+    # 【为什么要两次确认？】
+    # 重置软件会删除所有记账数据，这是不可逆的操作。
+    # 两次确认可以最大程度防止误操作（比如用户以为"重置"是"恢复默认设置"）。
+
+
+# ============================================================
+#  THEME_PRESETS 主题预设系统（v1.3 新增）—— theme.py 中实现
+# ============================================================
+#
+#  【为什么要单独做预设？】
+#  ttkbootstrap 的 18 个主题都是"浅色系"，彼此差异很小。
+#  用户切换 cosmo → darkly，几乎看不出区别。
+#  THEME_PRESETS 通过注入自定义颜色，让深色模式、护眼模式等
+#  真正有视觉差异。
+#
+#  【三个预设】
+#  1. 深色模式：深蓝黑背景(#1a1a2e) + 浅灰文字(#e0e0e0) + 红色强调色(#e94560)
+#  2. 护眼模式：米黄背景(#f5f0e1) + 深棕文字(#3d3229) + 橄榄绿强调色(#6b8e23)
+#  3. 海洋蓝：  浅蓝背景(#e8f4f8) + 深蓝文字(#1b3a4b) + 蓝色强调色(#0077b6)
+#
+#  【apply_preset() 的工作原理】（theme.py 第 110-150 行）
+#  1. 从 THEME_PRESETS 字典取出预设的颜色配置
+#  2. 用 style.configure() 修改 ttkbootstrap 的样式
+#     → TLabel、TButton、TEntry、TFrame、Treeview 等所有 ttk 组件
+#  3. 颜色包括：bg（背景）、fg（文字）、field_bg（输入框）、select_bg（选中）
+#
+#  【apply_preset_to_root() 的工作原理】（theme.py 第 153-195 行）
+#  ttkbootstrap 的 style.configure() 只影响 ttk 组件。
+#  tkinter 的原生组件（如 Menu、Text、Listbox）需要用 config() 单独设置。
+#  apply_preset_to_root() 递归遍历窗口中的所有组件，给 tk 原生组件上色。
+#
+#  【数据流】
+#  用户选择预设 → _on_apply_settings()
+#      → apply_preset(preset_name, self.style)     ← 修改 ttk 组件样式
+#      → apply_preset_to_root(self.root, preset_name) ← 修改 tk 原生组件
+#      → save_settings() 保存到 settings.json（包含 preset 字段）
+#
+#  下次启动时 → __init__() 中检查 saved_preset
+#      → apply_preset(saved_preset, self.style)
+#  → run() 中 → apply_preset_to_root(self.root, saved_preset)
+#
+#  【settings.json 中的 preset 字段】
+#  {"theme": "cosmo", "preset": "深色模式", ...}
+#  preset 为空字符串时表示使用普通主题，非空时表示使用预设。
+#
+# ============================================================
+
+
+# ============================================================
+#  run() + main() —— 程序入口和事件循环（第 1015-1058 行）
+# ============================================================
+#
+#  run() 是启动方法，main() 是程序入口。
+#
+#  【启动链】
+#  python gui.py
+#      → __name__ == "__main__" 成立（第 1057 行）
+#      → 调 main()（第 1039 行）
+#      → 创建 AccountApp()（触发 __init__，构建窗口 + 加载数据）
+#      → 调 app.run()（进入事件循环）
+#
+#  【Python 知识点：__name__ == "__main__"】
+#  当文件被直接运行时，__name__ 的值是 "__main__"；
+#  当文件被 import 时，__name__ 的值是模块名（如 "gui"）。
+#  这个判断确保 main() 只在直接运行时执行，被 import 时不执行。
+#
+#  【Python 知识点：mainloop() 事件循环】
+#  mainloop() 是 tkinter 的核心：让程序一直运行，等待用户操作。
+#  它不断地监听鼠标点击、键盘输入等事件，然后调用对应的回调函数。
+#  用户关闭窗口时，mainloop() 返回，程序结束。
+#
+# ============================================================
+
+    def run(self):
+        # ① 从磁盘加载数据到内存工作副本
+        self._entries = self.storage.load_all()
+        # ② 从工作副本刷新界面
+        self._refresh_list()
+
+        # ③ 如果有保存的预设，应用颜色到所有 tk 原生组件
+        saved_preset = self._settings.get("preset", "")
+        if saved_preset and saved_preset in THEME_PRESETS:
+            apply_preset_to_root(self.root, saved_preset)
+
+        # ④ 进入事件循环（等待用户操作）
+        self.root.mainloop()
+
+
+def main():
+    app = AccountApp()
+    app.run()
+
+
+if __name__ == "__main__":
+    main()
+
+
+# ============================================================
+#  数据流向总览
+# ============================================================
+#
+#  记账数据流：
+#  ┌─────────┐     ┌──────────┐     ┌───────────┐     ┌───────────┐
+#  │ 界面控件 │────▶│ gui.py   │────▶│ 内存副本  │────▶│ storage.py│
+#  │ (输入框) │     │ (控制器) │     │ _entries  │     │ (写盘)    │
+#  └─────────┘     └──────────┘     └───────────┘     └─────┬─────┘
+#                          │                                  │
+#                          │ models.py                        ▼
+#                          │ (校验)                    ┌───────────┐
+#                          ▼                           │ accounts  │
+#                   ┌──────────┐                       │ .json     │
+#                   │ 校验通过 │                       └───────────┘
+#                   └──────────┘
+#
+#  设置数据流：
+#  ┌─────────┐     ┌──────────┐     ┌───────────┐     ┌───────────┐
+#  │ 设置页  │────▶│ gui.py   │────▶│ theme.py  │────▶│ settings  │
+#  │ 控件    │     │          │     │ (模块变量)│     │ .json     │
+#  └─────────┘     └──────────┘     └───────────┘     └───────────┘
+#                          │
+#                          │ apply_preset()
+#                          ▼
+#                   ┌───────────┐
+#                   │ ttkbootstrap │
+#                   │ Style 对象   │
+#                   └───────────┘
+#
+# ============================================================
+
+
+# ============================================================
+#  文件依赖关系（谁调用谁）
+# ============================================================
+#
+#  gui.py（界面层）
+#    ├── imports config.py    （常量：类型、分类、格式）
+#    ├── imports models.py    （BillEntry 数据模型）
+#    ├── imports storage.py   （Storage 存储管理器）
+#    ├── imports utils.py     （工具函数：日期、金额校验）
+#    ├── imports theme.py     （样式配置、字体、主题分组、预设系统）
+#    └── imports ui_components.py（FormRow、DataTable、StatsCard、弹窗）
+#
+#  theme.py（样式层）
+#    ├── imports config.py    （DATA_DIR 路径）
+#    ├── imports json         （读写 settings.json）
+#    ├── imports tkinter      （设置 tk 原生组件颜色）
+#    └── imports ttkbootstrap （修改 ttk 组件样式）
+#
+#  storage.py（持久化层）
+#    ├── imports config.py    （DATA_FILE 路径）
+#    └── imports models.py    （BillEntry）
+#
+#  models.py（模型层）
+#    └── imports config.py    （类型常量、日期格式）
+#
+#  utils.py（工具层）
+#    └── imports config.py    （日期格式、金额精度）
+#
+#  ui_components.py（组件层）
+#    ├── imports config.py    （TYPE_INCOME）
+#    ├── imports utils.py     （format_amount）
+#    └── imports theme.py     （get_font、颜色常量）
+#
+#  config.py（配置层）
+#    └── 不依赖任何其他模块（最底层）
+#
+# ============================================================
+
+
+# ============================================================
+#  函数索引（按行号快速查找）
+# ============================================================
+#
+#  行号    函数名                    功能
+#  ----    --------                  ----
+#   83     _StatsRow.__init__        月度统计行适配器
+#  121     AccountApp.__init__       七步启动流程
+#  166     _build_ui                 构建标签页容器
+#  192     _build_add_tab            构建"记一笔"标签页
+#  252     _on_type_change           分类频率排序
+#  278     _on_save_entry            核心数据流（保存记录）
+#  326     _clear_add_form           清空表单
+#  341     _build_list_tab           构建"收支流水"标签页
+#  398     _refresh_list             从内存刷新界面
+#  433     _on_delete_entry          缓冲删除 + 撤回栈
+#  478     _on_undo_delete           撤回最近一次删除
+#  502     _update_undo_button_state 更新撤回按钮状态
+#  515     _on_close                 窗口关闭确认
+#  551     _build_stats_tab          构建"月度统计"标签页
+#  615     _on_query_stats           月度统计查询
+#  688     _build_settings_tab       构建"设置"标签页
+#  824     _on_apply_settings        应用设置
+#  899     _on_theme_select          分隔行防误选
+#  916     _on_restore_settings      恢复系统设置
+#  965     _on_reset_software        重置软件
+# 1015     run                       启动应用主循环
+# 1039     main                      程序入口
+#
+# ============================================================
