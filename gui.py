@@ -335,7 +335,7 @@ class AccountApp:
         """弹窗显示关于信息。"""
         messagebox.showinfo(
             "关于",
-            "个人记账本 v1.3\n\n"
+            "个人记账本 v1.5\n\n"
             "一个基于 Python + tkinter 的收支管理工具\n\n"
             "功能特色：\n"
             "  · 记账 / 流水 / 统计 / 主题设置\n"

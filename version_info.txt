@@ -4,8 +4,8 @@
 # http://msdn.microsoft.com/en-us/library/ms646997.aspx
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 4, 0, 0),
-    prodvers=(1, 4, 0, 0),
+    filevers=(1, 5, 0, 0),
+    prodvers=(1, 5, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -20,11 +20,11 @@ VSVersionInfo(
         u'080404b0',
         [StringStruct(u'CompanyName', u'Personal Project'),
         StringStruct(u'FileDescription', u'个人记账本 - 收支管理工具'),
-        StringStruct(u'FileVersion', u'1.4.0.0'),
+        StringStruct(u'FileVersion', u'1.5.0.0'),
         StringStruct(u'InternalName', u'account-book'),
         StringStruct(u'OriginalFilename', u'个人记账本.exe'),
         StringStruct(u'ProductName', u'个人记账本'),
-        StringStruct(u'ProductVersion', u'1.4.0.0'),
+        StringStruct(u'ProductVersion', u'1.5.0.0'),
         StringStruct(u'LegalCopyright', u'Copyright (C) 2026')])
       ]),
     VarFileInfo([VarStruct(u'Translation', [2052, 1200])])

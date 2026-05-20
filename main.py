@@ -43,7 +43,7 @@ def show_banner():
     """显示程序标题"""
     print()
     print("=" * 50)
-    print("      个人记账本 v1.4")
+    print("      个人记账本 v1.5")
     print("      命令行收支管理工具")
     print("=" * 50)
     print()

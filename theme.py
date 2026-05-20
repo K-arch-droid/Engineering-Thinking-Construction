@@ -212,7 +212,7 @@ DEFAULT_SETTINGS = {
 # 窗口配置
 # ============================================================
 
-WINDOW_TITLE = "个人记账本 v1.4"
+WINDOW_TITLE = "个人记账本 v1.5"
 WINDOW_WIDTH = 900
 WINDOW_HEIGHT = 600
 WINDOW_MIN_WIDTH = 700
