@@ -225,8 +225,10 @@ class AccountApp:
         #   ⚠️ 注意：command=self._open_file("xxx") 是错误写法！
         #      这样会立即执行函数，把返回值赋给 command。
         #      正确写法是传函数引用：command=self._open_doc_code_guide
+        help_menu.add_command(label="📖 文件分类指南", command=self._open_doc_file_guide)
         help_menu.add_command(label="📖 代码阅读目录", command=self._open_doc_code_guide)
         help_menu.add_command(label="📖 UI 交互逻辑", command=self._open_doc_ui_logic)
+        help_menu.add_command(label="📖 exe 运行原理", command=self._open_doc_exe_principle)
         help_menu.add_command(label="📖 更新日志", command=self._open_doc_changelog)
         help_menu.add_command(label="📖 README", command=self._open_doc_readme)
 
@@ -277,15 +279,23 @@ class AccountApp:
         except Exception as e:
             show_error("打开失败", f"无法打开文件：\n{e}")
 
-    # ---- 以下 4 个函数是菜单项的回调 ----
+    # ---- 以下函数是菜单项的回调 ----
     # 为什么每个菜单项单独一个函数，而不是直接 lambda？
     # 因为 add_command 的 command 参数只能传"无参数的可调用对象"。
     # 如果用 lambda：command=lambda: self._open_file("xxx")
     # 这样写也行，但单独的函数更清晰，也方便调试（堆栈里能看到函数名）。
 
+    def _open_doc_file_guide(self):
+        """菜单项回调：打开"文件分类指南.txt"。"""
+        self._open_file("文件分类指南.txt")
+
     def _open_doc_code_guide(self):
         """菜单项回调：打开"代码阅读目录.txt"。"""
         self._open_file("code阅读目录.txt")
+
+    def _open_doc_exe_principle(self):
+        """菜单项回调：打开"exe运行原理.txt"。"""
+        self._open_file("exe运行原理.txt")
 
     def _open_doc_ui_logic(self):
         """菜单项回调：打开"UI交互逻辑.txt"。"""
