@@ -1,5 +1,5 @@
 # ============================================================
-#  个人记账本 v1.5 - UI 交互逻辑详解（Python 学习版）
+#  个人记账本 v1.6 - UI 交互逻辑详解（Python 学习版）
 # ============================================================
 #
 #  本文档从"用户看到什么"出发，逐一解释每个界面元素背后的代码逻辑。
@@ -1896,6 +1896,287 @@ if __name__ == "__main__":
 # ============================================================
 #
 #
+# ============================================================
+#  安装包详解（v1.6 新增）—— 从文件夹到安装程序
+# ============================================================
+#
+#  你有没有想过，平时下载软件时双击的 "setup.exe" 是怎么做的？
+#  这一节告诉你：如何把打包好的文件夹变成一个专业的安装程序。
+#
+#  前情提要：
+#    build.py 把源码打包成文件夹（dist/个人记账本/）
+#    installer.nsi 把这个文件夹变成安装程序
+#
+#  用户视角：
+#    1. 双击 "个人记账本_安装程序.exe"
+#    2. 看到欢迎界面："欢迎安装 个人记账本"
+#    3. 选择安装目录（默认 C:\Program Files (x86)\个人记账本）
+#    4. 看到安装进度条
+#    5. 安装完成，询问是否删除安装包、是否打开程序
+#    6. 桌面多了快捷方式（如果勾选了）
+#    7. 开始菜单多了"个人记账本"文件夹
+#
+#  开发者视角：
+#    installer.nsi 是 NSIS 脚本，用 makensis.exe 编译成安装程序。
+#
+# ------------------------------------------------------------
+#  什么是 NSIS？
+# ------------------------------------------------------------
+#
+#  NSIS（Nullsoft Scriptable Install System）是一个免费的
+#  Windows 安装包制作工具。它用脚本语言描述安装过程，
+#  然后编译成一个 .exe 安装程序。
+#
+#  你平时下载软件时双击的 "setup.exe"，很多就是 NSIS 做的。
+#
+#  NSIS 脚本的基本结构：
+#    Section   = 安装时执行的操作（复制文件、创建快捷方式等）
+#    Function  = 可复用的代码块（回调函数、工具函数）
+#
+#  NSIS 的回调函数：
+#    .onInit          = 安装程序启动时（显示欢迎界面前）
+#    .onInstSuccess   = 安装成功后
+#    un.onInit        = 卸载程序启动时
+#
+# ------------------------------------------------------------
+#  安装程序的"身份证"（基本信息）
+# ------------------------------------------------------------
+#
+#  !define APP_NAME "个人记账本"
+#  !define APP_VERSION "1.6"
+#  !define APP_EXE "个人记账本.exe"
+#  OutFile "个人记账本_安装程序.exe"
+#  InstallDir "$PROGRAMFILES32\${APP_NAME}"
+#
+#  !define 定义常量，在脚本中用 ${APP_NAME} 引用。
+#  OutFile 指定编译后生成的文件名。
+#  InstallDir 指定默认安装目录。
+#  $PROGRAMFILES32 = C:\Program Files (x86)
+#
+# ------------------------------------------------------------
+#  MUI2 现代界面
+# ------------------------------------------------------------
+#
+#  !include "MUI2.nsh"
+#  !insertmacro MUI_PAGE_WELCOME
+#  !insertmacro MUI_PAGE_DIRECTORY
+#  !insertmacro MUI_PAGE_INSTFILES
+#  !insertmacro MUI_PAGE_FINISH
+#
+#  MUI2 是 NSIS 的现代 UI 框架，提供向导式安装界面。
+#  每个 MUI_PAGE_* 定义一个页面：
+#    WELCOME   = 欢迎页面（"欢迎安装 xxx"）
+#    DIRECTORY = 选择安装目录（用户可以修改路径）
+#    INSTFILES = 安装进度（复制文件的进度条）
+#    FINISH    = 完成页面（"安装完成" + 可选"立即运行"）
+#
+# ------------------------------------------------------------
+#  安装区段（Section）—— 实际执行的操作
+# ------------------------------------------------------------
+#
+#  Section "安装主程序" SecMain
+#      SetOutPath "$INSTDIR"
+#      File /r "dist\个人记账本\*.*"
+#      WriteUninstaller "$INSTDIR\uninstall.exe"
+#  SectionEnd
+#
+#  Section 是 NSIS 的核心概念：
+#    每个 Section 代表安装过程中的一个"步骤"。
+#    安装程序会按顺序执行所有 Section。
+#
+#  SetOutPath = 设置"当前目标目录"，后续的 File 命令会把文件复制到这里
+#  File /r    = 递归复制目录下的所有文件和子目录
+#  WriteUninstaller = 创建卸载程序（uninstall.exe）
+#
+# ------------------------------------------------------------
+#  可选区段（Section /o）
+# ------------------------------------------------------------
+#
+#  Section /o "创建桌面快捷方式" SecDesktop
+#      CreateShortcut "$DESKTOP\${APP_NAME}.lnk" \
+#          "$INSTDIR\${APP_EXE}" \
+#          "$INSTDIR" \
+#          "$INSTDIR\assets\icon.ico" \
+#          "打开${APP_NAME}"
+#  SectionEnd
+#
+#  Section /o 的 "o" 表示 Optional（可选）。
+#  用户可以在安装界面中勾选/取消这个选项。
+#  默认不勾选（用户主动选择才创建桌面快捷方式）。
+#
+#  CreateShortcut 的 5 个参数：
+#    1. 快捷方式文件路径（放在桌面）
+#    2. 目标程序路径
+#    3. 工作目录
+#    4. 图标路径
+#    5. 提示文字（鼠标悬停时显示）
+#
+# ------------------------------------------------------------
+#  注册表操作
+# ------------------------------------------------------------
+#
+#  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" \
+#      "DisplayName" "${APP_NAME}"
+#
+#  注册表是 Windows 的"配置数据库"。
+#  HKLM = HKEY_LOCAL_MACHINE（所有用户共享的配置）
+#
+#  这些注册表键让程序出现在"控制面板 → 添加/删除程序"列表中。
+#  用户可以从那里卸载程序。
+#
+# ------------------------------------------------------------
+#  回调函数（.onInit / .onInstSuccess）
+# ------------------------------------------------------------
+#
+#  Function .onInit
+#      ; 检查是否已经安装过
+#      ReadRegStr $0 HKLM "Software\${APP_NAME}" "InstallDir"
+#      ${If} $0 != ""
+#          MessageBox MB_YESNO|MB_ICONQUESTION \
+#              "检测到 ${APP_NAME} 已安装在 $0$\n$\n是否覆盖安装？" \
+#              IDYES ContinueInstall
+#          Abort
+#          ContinueInstall:
+#      ${EndIf}
+#  FunctionEnd
+#
+#  .onInit 在安装程序启动时执行（显示任何界面前）。
+#  这里用它检测是否已安装过，询问是否覆盖安装。
+#
+#  Function .onInstSuccess
+#      ; 询问是否删除安装包
+#      MessageBox MB_YESNO|MB_ICONQUESTION \
+#          "安装完成！$\n$\n是否删除安装程序？" \
+#          IDYES DeleteInstaller IDNO SkipDelete
+#
+#      DeleteInstaller:
+#          ; 使用 cmd /c ping 延迟 2 秒后删除安装程序
+#          Exec 'cmd /c ping 127.0.0.1 -n 3 > nul & del "$EXEPATH"'
+#      SkipDelete:
+#
+#      ; 询问是否打开软件
+#      MessageBox MB_YESNO|MB_ICONQUESTION \
+#          "是否立即打开 ${APP_NAME}？" \
+#          IDYES LaunchApp IDNO SkipLaunch
+#
+#      LaunchApp:
+#          Exec '"$INSTDIR\${APP_EXE}"'
+#      SkipLaunch:
+#  FunctionEnd
+#
+#  .onInstSuccess 在所有文件复制完成后执行。
+#  这里用它实现"删除安装包"和"打开软件"的功能。
+#
+#  为什么删除安装包需要延迟？
+#    因为安装程序还在运行，不能立即删除自己。
+#    cmd /c ping 127.0.0.1 -n 3 > nul 等待约 2 秒。
+#    然后 del "$EXEPATH" 删除安装程序自身。
+#
+# ------------------------------------------------------------
+#  卸载区段
+# ------------------------------------------------------------
+#
+#  Section "Uninstall"
+#      RMDir /r "$INSTDIR"
+#      Delete "$DESKTOP\${APP_NAME}.lnk"
+#      RMDir /r "$SMPROGRAMS\${APP_NAME}"
+#      DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
+#      DeleteRegKey HKLM "Software\${APP_NAME}"
+#  SectionEnd
+#
+#  卸载时执行的操作：
+#    RMDir /r       = 递归删除安装目录及其所有内容
+#    Delete          = 删除桌面快捷方式
+#    DeleteRegKey    = 删除注册表键
+#
+#  WriteUninstaller 在安装时创建 uninstall.exe。
+#  用户运行它时，NSIS 会执行这个 Uninstall 区段。
+#
+# ------------------------------------------------------------
+#  NSIS 知识速查
+# ------------------------------------------------------------
+#
+#  1. !define 和 ${} 是什么？
+#     !define 定义常量，${} 引用常量。
+#     类似 Python 的变量定义和使用。
+#
+#  2. !include 是什么？
+#     引入其他 NSIS 脚本文件（类似 Python 的 import）。
+#     MUI2.nsh 提供了现代 UI 框架。
+#
+#  3. !insertmacro 是什么？
+#     插入 NSIS 宏（类似 Python 的函数调用）。
+#     MUI_PAGE_* 等都是宏。
+#
+#  4. Section 和 Function 有什么区别？
+#     Section = 安装时执行的操作（按顺序执行所有 Section）
+#     Function = 可复用的代码块（回调函数、工具函数）
+#
+#  5. Section /o 的 "o" 是什么意思？
+#     Optional（可选）。用户可以勾选/取消。
+#     没有 /o 的 Section 默认必选。
+#
+#  6. .onInit 和 .onInstSuccess 有什么区别？
+#     .onInit = 安装程序启动时（显示界面前）
+#     .onInstSuccess = 安装成功后（所有文件复制完成后）
+#
+#  7. un.onInit 是什么？
+#     卸载程序启动时的回调。un. 前缀表示卸载相关。
+#
+#  8. $INSTDIR 是什么？
+#     用户选择的安装目录（默认 C:\Program Files (x86)\个人记账本）。
+#
+#  9. $PROGRAMFILES32 是什么？
+#     C:\Program Files (x86)（32 位程序的默认安装目录）。
+#
+#  10. $DESKTOP 是什么？
+#      用户的桌面路径（如 C:\Users\用户名\Desktop）。
+#
+#  11. $SMPROGRAMS 是什么？
+#      开始菜单的程序文件夹（如 C:\ProgramData\Microsoft\Windows\Start Menu\Programs）。
+#
+#  12. WriteRegStr 和 DeleteRegKey 是什么？
+#      WriteRegStr = 写入注册表字符串值
+#      DeleteRegKey = 删除注册表键
+#      注册表是 Windows 的"配置数据库"。
+#
+#  13. WriteUninstaller 是什么？
+#      在安装目录中创建 uninstall.exe（卸载程序）。
+#      用户运行它时，NSIS 会执行 Uninstall 区段。
+#
+#  14. RMDir /r 是什么？
+#      递归删除目录及其所有内容（类似 Python 的 shutil.rmtree）。
+#
+#  15. CreateShortcut 的 5 个参数是什么？
+#      1. 快捷方式文件路径
+#      2. 目标程序路径
+#      3. 工作目录
+#      4. 图标路径
+#      5. 提示文字
+#
+#  16. Exec 是什么？
+#      启动外部程序（类似 Python 的 subprocess.Popen）。
+#
+#  17. cmd /c ping 127.0.0.1 -n 3 > nul 是什么？
+#      Windows 命令：ping 本机 3 次（约 2 秒），输出重定向到 nul（丢弃）。
+#      用来延迟执行后续命令（让安装程序先退出）。
+#
+#  18. makensis 是什么？
+#      NSIS 的编译器，把 .nsi 脚本编译成 .exe 安装程序。
+#      命令行：makensis installer.nsi
+#
+#  19. MUI2 是什么？
+#      Modern UI 2.0，NSIS 的现代 UI 框架。
+#      提供向导式安装界面（欢迎 → 选择目录 → 安装 → 完成）。
+#
+#  20. NSIS 和 PyInstaller 有什么区别？
+#      PyInstaller = 把 Python 代码打包成 .exe（解决"没有 Python 也能运行"）
+#      NSIS = 把文件夹打包成安装程序（解决"用户怎么安装软件"）
+#      两者配合使用：先 PyInstaller 打包，再 NSIS 做安装程序。
+#
+# ============================================================
+
+
 # ============================================================
 #  函数索引（按行号快速查找）
 # ============================================================

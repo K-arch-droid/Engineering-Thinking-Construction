@@ -1,5 +1,5 @@
 ================================================================
-        个人记账本 v1.5 - 代码阅读目录（按数据流顺序）
+        个人记账本 v1.6 - 代码阅读目录（按数据流顺序）
 ================================================================
 
   建议按 ① → ⑫ 的顺序阅读，每一步告诉你"看什么、为什么看、关注什么"。
@@ -345,6 +345,8 @@
   阅读顺序（从下往上 = 从底层到顶层）
 
       +------------------------------------+
+      |  installer.nsi      安装包层       | ⑭ 文件夹 → 安装程序
+      +------------------------------------+
       |  build.py            打包层        | ⑪ 源码 → .exe 的桥梁
       +------------------------------------+
       |  gui.py / main.py   界面层         | ⑦ 最后看：数据流的起点和终点
@@ -423,6 +425,69 @@
   run()      → 检查 saved_preset → apply_preset_to_root()
 
 ================================================================
+  第十四站：安装包 —— 从文件夹到安装程序
+================================================================
+
+  文件：installer.nsi（约 300 行）★ v1.6 新增
+
+  阅读顺序：
+    1. 文件头：什么是 NSIS？                         （1-27 行）★ 必读
+       - NSIS = Nullsoft Scriptable Install System
+       - 用脚本描述安装过程，编译成 .exe 安装程序
+       - Section（安装区段）和 Function（函数）的概念
+    2. 基本信息：安装程序的"身份证"                  （30-58 行）
+       - !define APP_NAME / APP_VERSION / APP_EXE
+       - OutFile：编译后生成的文件名
+       - InstallDir：默认安装目录（$PROGRAMFILES32）
+       - InstallDirRegKey：注册表记录安装路径
+       - RequestExecutionLevel admin：请求管理员权限
+       - SetCompressor /SOLID lzma：压缩算法
+    3. 界面设置：MUI2 现代界面                       （62-89 行）★ 重点
+       - !include "MUI2.nsh"：引入现代 UI 框架
+       - MUI_ICON / MUI_UNICON：安装程序图标
+       - 页面顺序：欢迎 → 选择目录 → 安装进度 → 完成
+       - MUI_LANGUAGE "SimpChinese"：简体中文
+    4. 版本信息：嵌入到安装程序的 exe 中             （93-102 行）
+       - VIProductVersion：产品版本号四元组
+       - VIAddVersionKey：产品名、描述、版权等
+    5. 安装区段：实际执行的安装操作                  （106-158 行）★ 核心
+       - SetOutPath "$INSTDIR"：设置输出目录
+       - File /r "dist\个人记账本\*.*"：递归复制打包文件
+       - WriteUninstaller：创建卸载程序
+       - WriteRegStr：写入注册表（添加/删除程序列表）
+    6. 桌面快捷方式区段                              （163-181 行）
+       - Section /o：可选区段（用户可勾选/取消）
+       - CreateShortcut：创建快捷方式（5 个参数）
+    7. 开始菜单快捷方式区段                          （186-203 行）
+       - CreateDirectory：创建开始菜单文件夹
+       - CreateShortcut：创建程序和卸载快捷方式
+    8. 回调函数：安装过程中的"钩子"                  （207-278 行）★ 重点
+       - WelcomeShowCallback：欢迎页面显示时
+       - .onInit：安装程序启动时（检测已安装 → 覆盖安装确认）
+       - .onInstSuccess：安装成功后
+         · 询问删除安装包（cmd /c ping 延迟删除）
+         · 询问立即打开程序
+    9. 卸载区段：卸载时执行的操作                    （283-303 行）
+       - RMDir /r：递归删除安装目录
+       - Delete：删除桌面快捷方式
+       - DeleteRegKey：删除注册表键
+   10. 卸载回调函数                                  （308-318 行）
+       - un.onInit：卸载程序启动时（确认卸载对话框）
+
+  读完能回答：
+    · 什么是 NSIS？它和 PyInstaller 有什么区别？
+    · Section /o 的 "o" 是什么意思？
+    · .onInit 和 .onInstSuccess 有什么区别？
+    · 为什么删除安装包需要延迟？（cmd /c ping 原理）
+    · 注册表的 HKLM 是什么？InstallDirRegKey 有什么用？
+    · 安装程序怎么知道自己是"安装"还是"卸载"？
+    · 卸载程序是怎么被创建出来的？（WriteUninstaller）
+
+  编译方式：
+    makensis installer.nsi
+    编译后生成 "个人记账本_安装程序.exe"
+
+================================================================
   工程思维要点速查
 ================================================================
 
@@ -448,5 +513,12 @@
  20. 隐藏导入    PyInstaller 分析不到的模块需要手动 --hidden-import
  21. 跨平台打开  os.startfile (Win) / open (Mac) / xdg-open (Linux)
  22. 菜单层级    Menu → add_cascade → Menu → add_command
+ 23. NSIS 脚本   Section 定义安装操作，Function 定义回调逻辑
+ 24. MUI2 界面   !insertmacro MUI_PAGE_* 定义安装向导页面
+ 25. 注册表集成  WriteRegStr 写入"添加/删除程序"列表
+ 26. 可选区段    Section /o 让用户勾选/取消（如桌面快捷方式）
+ 27. 回调钩子    .onInit / .onInstSuccess 在特定时机自动执行
+ 28. 延迟删除    cmd /c ping 延迟，让安装程序先退出再删自身
+ 29. 卸载程序    WriteUninstaller 生成 uninstall.exe，RMDir /r 清理
 
 ================================================================
